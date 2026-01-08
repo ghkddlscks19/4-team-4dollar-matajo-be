@@ -2,7 +2,6 @@ import ws from 'k6/ws';
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 import { Counter, Rate } from 'k6/metrics';
-import { SharedArray } from 'k6/data';
 
 // =====================================================
 // 스모크 테스트 - 기본 기능 확인용
@@ -27,26 +26,8 @@ const BASE_URL = __ENV.BASE_URL || 'localhost:8080';
 const WS_URL = `ws://${BASE_URL}/ws-chat`;
 const HTTP_URL = `http://${BASE_URL}`;
 
-// 토큰 캐시
-let tokenCache = {};
-
-// 테스트용 토큰 가져오기
-function getToken(userId) {
-  if (tokenCache[userId]) {
-    return tokenCache[userId];
-  }
-
-  const res = http.get(`${HTTP_URL}/api/test/token/${userId}`);
-  if (res.status === 200) {
-    const data = res.json();
-    tokenCache[userId] = data.accessToken;
-    return data.accessToken;
-  }
-  return null;
-}
-
 export function setup() {
-  // 테스트 시작 전 토큰 생성 엔드포인트 확인
+  // 서버 헬스체크
   const healthCheck = http.get(`${HTTP_URL}/actuator/health`);
   if (healthCheck.status !== 200) {
     throw new Error('Server is not healthy');
@@ -58,7 +39,7 @@ export function setup() {
     console.log('Test tokens generated successfully');
     return tokenRes.json();
   } else {
-    console.log('Warning: Could not generate test tokens. Test may use fallback authentication.');
+    console.log('Warning: Could not generate test tokens');
     return { tokens: {} };
   }
 }
@@ -68,15 +49,17 @@ export default function (data) {
   const roomId = (__VU % 5) + 1;
 
   // Setup에서 받은 토큰 사용
-  let token = data.tokens ? data.tokens[String(userId)] : null;
+  const token = data.tokens ? data.tokens[String(userId)] : null;
 
-  // 토큰이 없으면 직접 가져오기
   if (!token) {
-    token = getToken(userId);
+    console.log(`No token for user ${userId}`);
+    connectionSuccess.add(0);
+    apiSuccess.add(0);
+    return;
   }
 
   // REST API 테스트
-  const headers = token ? { 'Authorization': `Bearer ${token}` } : {};
+  const headers = { 'Authorization': `Bearer ${token}` };
   const apiRes = http.get(`${HTTP_URL}/api/chats`, { headers });
 
   const apiCheck = check(apiRes, {
@@ -85,16 +68,12 @@ export default function (data) {
   apiSuccess.add(apiCheck ? 1 : 0);
 
   // WebSocket 테스트
-  if (!token) {
-    console.log(`No token for user ${userId}, skipping WebSocket test`);
-    connectionSuccess.add(0);
-    return;
-  }
-
   const url = `${WS_URL}/websocket?userId=${userId}&token=${token}`;
 
+  let wsConnected = false;
+
   const res = ws.connect(url, {}, function (socket) {
-    connectionSuccess.add(1);
+    wsConnected = true;
 
     socket.send('CONNECT\naccept-version:1.2\nheart-beat:10000,10000\n\n\0');
 
@@ -107,7 +86,7 @@ export default function (data) {
     });
 
     socket.on('error', function (e) {
-      connectionSuccess.add(0);
+      console.log(`WebSocket error: ${e.error()}`);
     });
 
     // 메시지 3개 전송
@@ -115,9 +94,9 @@ export default function (data) {
       sleep(2);
 
       const messageContent = JSON.stringify({
-        senderId: userId,
+        sender_id: userId,
         content: `Smoke test message ${i + 1}`,
-        messageType: 'TEXT',
+        message_type: 'TEXT',
         sendTimestamp: Date.now(),
       });
 
@@ -126,21 +105,23 @@ export default function (data) {
     }
 
     sleep(3);
-    socket.send('DISCONNECT\n\n\0');
+    // STOMP DISCONNECT - 정상 종료 (에러 무시 가능)
+    socket.close();
   });
 
-  check(res, {
-    'WebSocket connected': (r) => r && r.status === 101,
+  // 연결 결과 판정 (ws.connect 완료 후)
+  const connected = check(res, {
+    'WebSocket status is 101': (r) => r && r.status === 101,
   });
 
-  if (!res || res.status !== 101) {
-    connectionSuccess.add(0);
-  }
+  // 메트릭은 한 번만 기록
+  connectionSuccess.add(connected ? 1 : 0);
 }
 
 export function handleSummary(data) {
-  const passed = (data.metrics.connection_success?.values.rate || 0) >= 0.9 &&
-                 (data.metrics.api_success?.values.rate || 0) >= 0.9;
+  const connRate = data.metrics.connection_success?.values.rate || 0;
+  const apiRate = data.metrics.api_success?.values.rate || 0;
+  const passed = connRate >= 0.9 && apiRate >= 0.9;
 
   console.log('\n' + '='.repeat(50));
   console.log('  SMOKE TEST RESULTS');
@@ -148,8 +129,8 @@ export function handleSummary(data) {
   console.log(`\nStatus: ${passed ? 'PASSED' : 'FAILED'}`);
   console.log(`\nMessages Sent: ${data.metrics.messages_sent?.values.count || 0}`);
   console.log(`Messages Received: ${data.metrics.messages_received?.values.count || 0}`);
-  console.log(`WS Connection Success: ${((data.metrics.connection_success?.values.rate || 0) * 100).toFixed(2)}%`);
-  console.log(`API Success: ${((data.metrics.api_success?.values.rate || 0) * 100).toFixed(2)}%`);
+  console.log(`WS Connection Success: ${(connRate * 100).toFixed(2)}%`);
+  console.log(`API Success: ${(apiRate * 100).toFixed(2)}%`);
   console.log('\n' + '='.repeat(50));
 
   if (passed) {
@@ -162,8 +143,9 @@ export function handleSummary(data) {
     'stdout': JSON.stringify({
       status: passed ? 'PASSED' : 'FAILED',
       messages_sent: data.metrics.messages_sent?.values.count || 0,
-      connection_success_rate: `${((data.metrics.connection_success?.values.rate || 0) * 100).toFixed(2)}%`,
-      api_success_rate: `${((data.metrics.api_success?.values.rate || 0) * 100).toFixed(2)}%`,
+      messages_received: data.metrics.messages_received?.values.count || 0,
+      connection_success_rate: `${(connRate * 100).toFixed(2)}%`,
+      api_success_rate: `${(apiRate * 100).toFixed(2)}%`,
     }, null, 2),
   };
 }
