@@ -36,4 +36,7 @@ public class ChatMessageResponseDto {
 
     @Schema(description = "발신자 닉네임", example = "사용자1")
     private String senderNickname;
+
+    @Schema(description = "클라이언트 전송 타임스탬프 (레이턴시 측정용)", example = "1704672000000")
+    private Long sendTimestamp;
 }

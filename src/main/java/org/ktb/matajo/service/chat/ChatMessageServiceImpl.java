@@ -60,8 +60,8 @@ public class ChatMessageServiceImpl implements ChatMessageService {
         // 저장 후 상태 확인
         log.info("메시지 ID: {}, 저장 후 readStatus: {}", chatMessage.getId(), chatMessage.isReadStatus());
 
-        // 응답 DTO 생성
-        ChatMessageResponseDto responseDto = convertToChatMessageResponseDto(chatMessage);
+        // 응답 DTO 생성 (sendTimestamp 포함 - 레이턴시 측정용)
+        ChatMessageResponseDto responseDto = convertToChatMessageResponseDto(chatMessage, messageDto.getSendTimestamp());
 
         // 캐시 및 알림 처리 (비동기적이고 독립적인 처리)
         handleCacheAndNotification(roomId, responseDto, sender);
@@ -238,6 +238,15 @@ public class ChatMessageServiceImpl implements ChatMessageService {
      * ChatMessage 엔티티를 ChatMessageResponseDto로 변환
      */
     private ChatMessageResponseDto convertToChatMessageResponseDto(ChatMessage message) {
+        return convertToChatMessageResponseDto(message, null);
+    }
+
+    /**
+     * ChatMessage 엔티티를 ChatMessageResponseDto로 변환 (sendTimestamp 포함)
+     * @param message 채팅 메시지 엔티티
+     * @param sendTimestamp 클라이언트 전송 타임스탬프 (레이턴시 측정용)
+     */
+    private ChatMessageResponseDto convertToChatMessageResponseDto(ChatMessage message, Long sendTimestamp) {
         return ChatMessageResponseDto.builder()
                 .messageId(message.getId())
                 .roomId(message.getChatRoom().getId())
@@ -247,6 +256,7 @@ public class ChatMessageServiceImpl implements ChatMessageService {
                 .messageType(message.getMessageType())
                 .readStatus(message.isReadStatus())
                 .createdAt(message.getCreatedAt())
+                .sendTimestamp(sendTimestamp)
                 .build();
     }
 

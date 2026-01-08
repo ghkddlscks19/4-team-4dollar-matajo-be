@@ -31,6 +31,9 @@ public class ChatMessageRequestDto {
     @Builder.Default
     private MessageType messageType = MessageType.TEXT;
 
+    @Schema(description = "클라이언트 전송 타임스탬프 (레이턴시 측정용, 선택)", example = "1704672000000")
+    private Long sendTimestamp;
+
     // 추가 유효성 검증 메서드
     public boolean isImageTypeWithEmptyContent() {
         return MessageType.IMAGE.equals(this.messageType) &&

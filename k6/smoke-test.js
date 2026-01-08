@@ -97,7 +97,7 @@ export default function (data) {
         sender_id: userId,
         content: `Smoke test message ${i + 1}`,
         message_type: 'TEXT',
-        sendTimestamp: Date.now(),
+        send_timestamp: Date.now(),
       });
 
       socket.send(`SEND\ndestination:/app/${roomId}/message\ncontent-type:application/json\n\n${messageContent}\0`);

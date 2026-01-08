@@ -111,8 +111,9 @@ export default function (data) {
           const bodyMatch = message.match(/\n\n(.+)\0/);
           if (bodyMatch) {
             const body = JSON.parse(bodyMatch[1]);
-            if (body.sendTimestamp) {
-              const latency = Date.now() - body.sendTimestamp;
+            // Jackson SNAKE_CASE 전략으로 send_timestamp로 응답됨
+            if (body.send_timestamp) {
+              const latency = Date.now() - body.send_timestamp;
               messageLatency.add(latency);
             }
           }
@@ -143,7 +144,7 @@ export default function (data) {
         sender_id: userId,
         content: `Message ${i + 1} from user ${userId}`,
         message_type: 'TEXT',
-        sendTimestamp: sendTimestamp,
+        send_timestamp: sendTimestamp,
       });
 
       socket.send(`SEND\ndestination:/app/${roomId}/message\ncontent-type:application/json\n\n${messageContent}\0`);
