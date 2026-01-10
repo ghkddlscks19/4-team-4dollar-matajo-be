@@ -5,6 +5,7 @@ import { Counter, Trend, Rate, Gauge } from 'k6/metrics';
 
 // =====================================================
 // 실시간 채팅 WebSocket 부하 테스트
+// 플로우: Keeper가 게시글 → User가 채팅 요청 → 1대1 채팅
 // Target: 1000 VUs (동시 사용자)
 // =====================================================
 
@@ -26,11 +27,13 @@ export const options = {
       executor: 'ramping-vus',
       startVUs: 0,
       stages: [
-        { duration: '1m', target: 200 },     // 1분: 워밍업
-        { duration: '2m', target: 500 },     // 2분: 500 VUs
-        { duration: '2m', target: 1000 },    // 2분: 1000 VUs 도달
-        { duration: '3m', target: 1000 },    // 3분: 1000 VUs 유지 (안정성 검증)
-        { duration: '1m', target: 0 },       // 1분: 정리
+        { duration: '1m', target: 100 },    // 워밍업
+        { duration: '2m', target: 300 },    // 증가
+        { duration: '2m', target: 500 },    // 증가
+        { duration: '3m', target: 1000 },   // 목표 도달
+        { duration: '5m', target: 1000 },   // 안정성 검증 (중요!)
+        { duration: '2m', target: 500 },    // 감소
+        { duration: '1m', target: 0 },      // 정리
       ],
       gracefulRampDown: '30s',
     },
@@ -42,47 +45,67 @@ export const options = {
     'ws_message_success': ['rate>0.95'],
     'ws_message_latency': ['p(95)<500'],
   },
+  summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'],
 };
 
 // =====================================================
 // 환경 설정
 // =====================================================
 const BASE_URL = __ENV.BASE_URL || 'localhost:8080';
-const WS_URL = `ws://${BASE_URL}/ws-chat`;
+// SockJS 없는 raw WebSocket 엔드포인트 사용 (부하 테스트용)
+const WS_URL = `ws://${BASE_URL}/ws-chat-raw`;
 const HTTP_URL = `http://${BASE_URL}`;
 
 // =====================================================
-// Setup: 테스트 토큰 미리 생성 (1000명)
+// Setup: 테스트 데이터 생성 (Keeper, User, Post, ChatRoom)
 // =====================================================
 export function setup() {
-  console.log('Generating test tokens for 1000 users...');
+  console.log('Creating test data: 100 keepers, 1000 users, 100 posts, 1000 chat rooms...');
 
-  const tokenRes = http.get(`${HTTP_URL}/api/test/tokens?count=1000`);
-  if (tokenRes.status === 200) {
-    console.log('Test tokens generated successfully');
-    return tokenRes.json();
+  const setupRes = http.post(`${HTTP_URL}/api/test/setup?keeperCount=100&userCount=1000&postCount=100`);
+  if (setupRes.status === 200) {
+    const data = setupRes.json();
+    console.log(`Test data created: ${data.chat_rooms_created} chat rooms ready.`);
+    return {
+      chatRooms: data.chat_rooms,  // [{room_id, user_id, keeper_id, post_id}, ...]
+      keeperTokens: data.keeper_tokens,
+      userTokens: data.user_tokens
+    };
   } else {
-    console.log('Warning: Could not generate test tokens');
-    return { tokens: {} };
+    console.log('Warning: Could not create test data');
+    return { chatRooms: [], keeperTokens: {}, userTokens: {} };
   }
 }
 
 // =====================================================
 // 메인 테스트 함수
+// 플로우: 미리 생성된 채팅방에 접속 → 1대1 채팅
 // =====================================================
 export default function (data) {
-  const userId = ((__VU - 1) % 1000) + 1;
-  const roomId = ((__VU - 1) % 100) + 1;  // 100개 채팅방에 분산
+  // 1000개의 채팅방 중 하나 선택
+  const index = (__VU - 1) % data.chatRooms.length;
+  const chatRoom = data.chatRooms[index];
 
-  // 토큰 가져오기
-  const token = data.tokens ? data.tokens[String(userId)] : null;
-
-  if (!token) {
+  if (!chatRoom) {
     connectionSuccess.add(0);
+    sleep(1);
     return;
   }
 
-  const url = `${WS_URL}/websocket?userId=${userId}&token=${token}`;
+  const userId = String(chatRoom.user_id);
+  const userToken = data.userTokens[userId];
+  const roomId = chatRoom.room_id;
+
+  if (!userToken || !roomId) {
+    connectionSuccess.add(0);
+    sleep(1);
+    return;
+  }
+
+  // =====================================================
+  // WebSocket 연결 및 1대1 채팅 (setTimeout 사용)
+  // =====================================================
+  const url = `${WS_URL}?token=${userToken}&userId=${userId}`;
   const connectStart = Date.now();
 
   const res = ws.connect(url, {}, function (socket) {
@@ -92,21 +115,18 @@ export default function (data) {
 
     let stompConnected = false;
 
-    // STOMP CONNECT
-    socket.send('CONNECT\naccept-version:1.2\nheart-beat:10000,10000\n\n\0');
-
     socket.on('message', function (message) {
-      messagesReceived.add(1);
-
       // STOMP CONNECTED 응답
-      if (message.includes('CONNECTED') && !stompConnected) {
+      if (message.startsWith('CONNECTED') && !stompConnected) {
         stompConnected = true;
         // 채팅방 구독
         socket.send(`SUBSCRIBE\nid:sub-${roomId}\ndestination:/topic/chat/${roomId}\n\n\0`);
       }
 
       // MESSAGE 수신 시 레이턴시 계산
-      if (message.includes('MESSAGE')) {
+      if (message.startsWith('MESSAGE')) {
+        messagesReceived.add(1);
+        messageSuccess.add(1);
         try {
           const bodyMatch = message.match(/\n\n(.+)\0/);
           if (bodyMatch) {
@@ -120,7 +140,6 @@ export default function (data) {
         } catch (e) {
           // 파싱 실패 무시
         }
-        messageSuccess.add(1);
       }
     });
 
@@ -132,31 +151,36 @@ export default function (data) {
       activeConnections.add(-1);
     });
 
-    // STOMP 연결 대기
-    sleep(1);
+    // STOMP CONNECT 전송
+    socket.send('CONNECT\naccept-version:1.2\nheart-beat:10000,10000\n\n\0');
 
-    // 메시지 전송 (5개)
-    for (let i = 0; i < 5; i++) {
-      sleep(Math.random() * 2 + 1);  // 1~3초 랜덤 대기
+    // 500ms 후 메시지 전송 시작 (STOMP 연결 대기)
+    socket.setTimeout(function () {
+      if (!stompConnected) {
+        return;
+      }
 
-      const sendTimestamp = Date.now();
-      const messageContent = JSON.stringify({
-        sender_id: userId,
-        content: `Message ${i + 1} from user ${userId}`,
-        message_type: 'TEXT',
-        send_timestamp: sendTimestamp,
-      });
+      // User가 메시지 전송 (5개, 1~2초 간격)
+      for (let i = 0; i < 5; i++) {
+        const delay = 1000 + Math.floor(Math.random() * 1000);  // 1~2초 랜덤
+        socket.setTimeout(function () {
+          const sendTimestamp = Date.now();
+          const messageContent = JSON.stringify({
+            sender_id: parseInt(userId),
+            content: `User ${userId}: Message ${i + 1}`,
+            message_type: 'TEXT',
+            send_timestamp: sendTimestamp,
+          });
+          socket.send(`SEND\ndestination:/app/${roomId}/message\ncontent-type:application/json\n\n${messageContent}\0`);
+          messagesSent.add(1);
+        }, (i + 1) * delay);  // 최소 1000ms (0은 허용 안됨)
+      }
+    }, 500);
 
-      socket.send(`SEND\ndestination:/app/${roomId}/message\ncontent-type:application/json\n\n${messageContent}\0`);
-      messagesSent.add(1);
-      messageSuccess.add(1);
-    }
-
-    // 연결 유지 (실제 채팅 시뮬레이션)
-    sleep(15);
-
-    // 종료
-    socket.close();
+    // 15초 후 연결 종료 (실제 채팅 시뮬레이션)
+    socket.setTimeout(function () {
+      socket.close();
+    }, 15000);
   });
 
   // 연결 결과 판정
@@ -176,7 +200,7 @@ export function handleSummary(data) {
 
   const summary = {
     test_info: {
-      name: 'WebSocket Chat Load Test',
+      name: 'WebSocket Chat Load Test (1:1 Chat Flow)',
       target_vus: 1000,
       duration_seconds: testDuration,
       timestamp: new Date().toISOString(),
@@ -184,7 +208,7 @@ export function handleSummary(data) {
     connection: {
       success_rate: `${((metrics.ws_connection_success?.values.rate || 0) * 100).toFixed(2)}%`,
       avg_time: `${(metrics.ws_connection_time?.values.avg || 0).toFixed(2)}ms`,
-      p50_time: `${(metrics.ws_connection_time?.values['p(50)'] || 0).toFixed(2)}ms`,
+      p50_time: `${(metrics.ws_connection_time?.values['p(50)'] || metrics.ws_connection_time?.values.med || 0).toFixed(2)}ms`,
       p95_time: `${(metrics.ws_connection_time?.values['p(95)'] || 0).toFixed(2)}ms`,
       p99_time: `${(metrics.ws_connection_time?.values['p(99)'] || 0).toFixed(2)}ms`,
     },
@@ -193,7 +217,7 @@ export function handleSummary(data) {
       total_received: metrics.ws_messages_received?.values.count || 0,
       success_rate: `${((metrics.ws_message_success?.values.rate || 0) * 100).toFixed(2)}%`,
       avg_latency: `${(metrics.ws_message_latency?.values.avg || 0).toFixed(2)}ms`,
-      p50_latency: `${(metrics.ws_message_latency?.values['p(50)'] || 0).toFixed(2)}ms`,
+      p50_latency: `${(metrics.ws_message_latency?.values['p(50)'] || metrics.ws_message_latency?.values.med || 0).toFixed(2)}ms`,
       p95_latency: `${(metrics.ws_message_latency?.values['p(95)'] || 0).toFixed(2)}ms`,
       p99_latency: `${(metrics.ws_message_latency?.values['p(99)'] || 0).toFixed(2)}ms`,
       max_latency: `${(metrics.ws_message_latency?.values.max || 0).toFixed(2)}ms`,
@@ -204,7 +228,7 @@ export function handleSummary(data) {
   };
 
   console.log('\n' + '='.repeat(60));
-  console.log('  WEBSOCKET LOAD TEST RESULTS (1000 VUs)');
+  console.log('  WEBSOCKET LOAD TEST RESULTS (1:1 Chat Flow)');
   console.log('='.repeat(60));
   console.log(`\n[Test Info]`);
   console.log(`  Duration: ${testDuration}s`);
