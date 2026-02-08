@@ -48,3 +48,6 @@ src/main/resources/application-docker.yml
 src/main/resources/firebase-service-account.json
 docker-compose.yml
 Dockerfile
+
+k6/
+
