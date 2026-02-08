@@ -1,5 +1,15 @@
 package org.ktb.matajo.config;
 
+import java.text.SimpleDateFormat;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
+import java.time.format.DateTimeFormatter;
+import java.util.TimeZone;
+
+import org.springframework.context.annotation.Bean;
+import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+
 import com.fasterxml.jackson.core.json.JsonWriteFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.PropertyNamingStrategy;
@@ -7,53 +17,44 @@ import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
 import com.fasterxml.jackson.datatype.jsr310.ser.LocalDateTimeSerializer;
-import org.springframework.context.annotation.Bean;
-import org.springframework.context.annotation.Configuration;
-import org.springframework.context.annotation.Primary;
-
-import java.text.SimpleDateFormat;
-import java.time.LocalDateTime;
-import java.time.ZoneId;
-import java.time.format.DateTimeFormatter;
-import java.util.TimeZone;
 
 @Configuration
 public class JacksonConfig {
 
-    @Bean
-    @Primary
-    public ObjectMapper objectMapper() {
-        ObjectMapper objectMapper = JsonMapper.builder()
-                .configure(JsonWriteFeature.ESCAPE_NON_ASCII, false) // ✅ 이모지 깨짐 방지
-                .build();
+  @Bean
+  @Primary
+  public ObjectMapper objectMapper() {
+    ObjectMapper objectMapper =
+        JsonMapper.builder()
+            .configure(JsonWriteFeature.ESCAPE_NON_ASCII, false) // ✅ 이모지 깨짐 방지
+            .build();
 
-        // 시간대 설정
-        objectMapper.setTimeZone(TimeZone.getTimeZone("Asia/Seoul"));
+    // 시간대 설정
+    objectMapper.setTimeZone(TimeZone.getTimeZone("Asia/Seoul"));
 
-        // snake_case to camelCase 설정 추가
-        objectMapper.setPropertyNamingStrategy(PropertyNamingStrategy.SNAKE_CASE);
+    // snake_case to camelCase 설정 추가
+    objectMapper.setPropertyNamingStrategy(PropertyNamingStrategy.SNAKE_CASE);
 
-        JavaTimeModule javaTimeModule = new JavaTimeModule();
+    JavaTimeModule javaTimeModule = new JavaTimeModule();
 
-        // 날짜 포맷 명시적 설정
-        objectMapper.setDateFormat(new SimpleDateFormat("yyyy.MM.dd HH:mm:ss"));
+    // 날짜 포맷 명시적 설정
+    objectMapper.setDateFormat(new SimpleDateFormat("yyyy.MM.dd HH:mm:ss"));
 
-        // Asia/Seoul 시간대로 LocalDateTime 직렬화
-        LocalDateTimeSerializer seoulTimeSerializer = new LocalDateTimeSerializer(
-                DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm:ss")
-                        .withZone(ZoneId.of("Asia/Seoul"))
-        );
+    // Asia/Seoul 시간대로 LocalDateTime 직렬화
+    LocalDateTimeSerializer seoulTimeSerializer =
+        new LocalDateTimeSerializer(
+            DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm:ss").withZone(ZoneId.of("Asia/Seoul")));
 
-        javaTimeModule.addSerializer(LocalDateTime.class, seoulTimeSerializer);
+    javaTimeModule.addSerializer(LocalDateTime.class, seoulTimeSerializer);
 
-        objectMapper.registerModule(javaTimeModule);
+    objectMapper.registerModule(javaTimeModule);
 
-        // 타임스탬프로 쓰지 않도록 설정
-        objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
+    // 타임스탬프로 쓰지 않도록 설정
+    objectMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
 
-//        // HTML 이스케이프 처리를 위한 설정 추가
-//        objectMapper.getFactory().setCharacterEscapes(new HTMLCharacterEscapes());
+    //        // HTML 이스케이프 처리를 위한 설정 추가
+    //        objectMapper.getFactory().setCharacterEscapes(new HTMLCharacterEscapes());
 
-        return objectMapper;
-    }
+    return objectMapper;
+  }
 }

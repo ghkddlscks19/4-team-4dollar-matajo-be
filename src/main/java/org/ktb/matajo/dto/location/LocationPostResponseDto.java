@@ -1,11 +1,11 @@
 package org.ktb.matajo.dto.location;
 
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.AccessLevel;
 
 /** 위치 기반 게시글 정보 응답 DTO Post ID와 Address 정보 포함 */
 @Getter

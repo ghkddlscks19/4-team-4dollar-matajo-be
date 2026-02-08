@@ -1,16 +1,17 @@
 package org.ktb.matajo.dto.post;
 
+import java.util.ArrayList;
+import java.util.List;
+
 import com.fasterxml.jackson.annotation.JsonInclude;
+
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.*;
+import lombok.AccessLevel;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
-import lombok.AccessLevel;
-
-import java.util.ArrayList;
-import java.util.List;
 
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -28,7 +29,11 @@ public class PostEditRequestDto {
   @Schema(description = "게시글 내용", example = "1개월 동안 아이패드 보관 맡기고 싶습니다. 소중히 보관해주실 분 찾습니다.")
   private String postContent;
 
-  @Schema(description = "선호 가격 (1원 ~ 9,999,999원)", example = "30000", minimum = "1", maximum = "9999999")
+  @Schema(
+      description = "선호 가격 (1원 ~ 9,999,999원)",
+      example = "30000",
+      minimum = "1",
+      maximum = "9999999")
   @Min(0)
   @Max(9999999)
   private Integer preferPrice;
@@ -48,6 +53,11 @@ public class PostEditRequestDto {
   private String mainImage;
 
   @Size(max = 4) // 상세 이미지 최대 4개로 제한
-  @Schema(description = "상세 이미지 URL 또는 경로 목록 (최대 4개)", example = "[\"https://example.com/images/detail1.jpg\", \"https://example.com/images/detail2.jpg\"]")
-  private List<String> detailImages = new ArrayList<>();;
+  @Schema(
+      description = "상세 이미지 URL 또는 경로 목록 (최대 4개)",
+      example =
+          "[\"https://example.com/images/detail1.jpg\", \"https://example.com/images/detail2.jpg\"]")
+  private List<String> detailImages = new ArrayList<>();
+
+  ;
 }

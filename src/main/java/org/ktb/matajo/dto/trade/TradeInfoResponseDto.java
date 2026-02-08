@@ -10,6 +10,6 @@ import lombok.*;
 @Schema(description = "거래 정보 생성 응답 DTO")
 public class TradeInfoResponseDto {
 
-    @Schema(description = "생성된 거래 정보 ID", example = "1")
-    private Long tradeId;
+  @Schema(description = "생성된 거래 정보 ID", example = "1")
+  private Long tradeId;
 }

@@ -1,6 +1,7 @@
 package org.ktb.matajo.dto.storage;
 
 import com.fasterxml.jackson.annotation.JsonProperty;
+
 import lombok.AllArgsConstructor;
 import lombok.Getter;
 
@@ -8,12 +9,12 @@ import lombok.Getter;
 @AllArgsConstructor
 public class StorageResponseDto {
 
-    private Long id;
+  private Long id;
 
-    @JsonProperty("kakao_map_link")
-    private String kakaoMapLink;
+  @JsonProperty("kakao_map_link")
+  private String kakaoMapLink;
 
-    private String name;
+  private String name;
 
-    private String address;
+  private String address;
 }

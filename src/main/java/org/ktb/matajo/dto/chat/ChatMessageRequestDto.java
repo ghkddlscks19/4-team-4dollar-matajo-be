@@ -1,13 +1,13 @@
 package org.ktb.matajo.dto.chat;
 
+import org.ktb.matajo.entity.MessageType;
+
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Positive;
 import jakarta.validation.constraints.Size;
 import lombok.*;
-import org.ktb.matajo.entity.MessageType;
-import org.springframework.util.StringUtils;
 
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
@@ -16,28 +16,31 @@ import org.springframework.util.StringUtils;
 @Schema(description = "채팅 메시지 요청 DTO")
 public class ChatMessageRequestDto {
 
-    @Schema(description = "발신자 ID", example = "1", required = true)
-    @NotNull(message = "발신자 ID는 필수 항목입니다")
-    @Positive(message = "발신자 ID는 양수여야 합니다")
-    private Long senderId;
+  @Schema(description = "발신자 ID", example = "1", required = true)
+  @NotNull(message = "발신자 ID는 필수 항목입니다")
+  @Positive(message = "발신자 ID는 양수여야 합니다")
+  private Long senderId;
 
-    @Schema(description = "메시지 내용", example = "안녕하세요!", required = true, maxLength = 500)
-    @NotBlank(message = "메시지 내용 필수 항목입니다.")
-    @Size(min=1, max = 500, message = "메시지 내용은 1자 이 500자 이하여야 합니다")
-    private String content;
+  @Schema(description = "메시지 내용", example = "안녕하세요!", required = true, maxLength = 500)
+  @NotBlank(message = "메시지 내용 필수 항목입니다.")
+  @Size(min = 1, max = 500, message = "메시지 내용은 1자 이 500자 이하여야 합니다")
+  private String content;
 
-    @Schema(description = "메시지 타입 (TEXT, IMAGE, SYSTEM)", example = "TEXT", required = true, defaultValue = "TEXT")
-    @NotNull(message = "메시지 타입은 필수 항목입니다")
-    @Builder.Default
-    private MessageType messageType = MessageType.TEXT;
+  @Schema(
+      description = "메시지 타입 (TEXT, IMAGE, SYSTEM)",
+      example = "TEXT",
+      required = true,
+      defaultValue = "TEXT")
+  @NotNull(message = "메시지 타입은 필수 항목입니다")
+  @Builder.Default
+  private MessageType messageType = MessageType.TEXT;
 
-    @Schema(description = "클라이언트 전송 타임스탬프 (레이턴시 측정용, 선택)", example = "1704672000000")
-    private Long sendTimestamp;
+  @Schema(description = "클라이언트 전송 타임스탬프 (레이턴시 측정용, 선택)", example = "1704672000000")
+  private Long sendTimestamp;
 
-    // 추가 유효성 검증 메서드
-    public boolean isImageTypeWithEmptyContent() {
-        return MessageType.IMAGE.equals(this.messageType) &&
-                (this.content == null || this.content.trim().isEmpty());
-    }
-
+  // 추가 유효성 검증 메서드
+  public boolean isImageTypeWithEmptyContent() {
+    return MessageType.IMAGE.equals(this.messageType)
+        && (this.content == null || this.content.trim().isEmpty());
+  }
 }

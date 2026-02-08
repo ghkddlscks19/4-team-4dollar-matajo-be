@@ -8,7 +8,7 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class LoginResponseDto {
-    private String accessToken;
-    private String refreshToken;
-    private String nickname;
+  private String accessToken;
+  private String refreshToken;
+  private String nickname;
 }
