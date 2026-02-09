@@ -6,7 +6,8 @@ import { Counter, Trend, Rate, Gauge } from 'k6/metrics';
 // =====================================================
 // 실시간 채팅 WebSocket 부하 테스트
 // 플로우: Keeper가 게시글 → User가 채팅 요청 → 1대1 채팅
-// Target: 1000 VUs (동시 사용자)
+// Target: 5,000 VUs (동시 사용자)
+// 목표: DAU 5만 명 규모 서비스의 피크 시간대 시뮬레이션
 // =====================================================
 
 // 커스텀 메트릭 정의
@@ -19,7 +20,7 @@ const messageSuccess = new Rate('ws_message_success');
 const activeConnections = new Gauge('ws_active_connections');
 
 // =====================================================
-// 테스트 시나리오: 1000 VUs
+// 테스트 시나리오: 5,000 VUs (DAU 5만 명 피크 기준)
 // =====================================================
 export const options = {
   scenarios: {
@@ -27,23 +28,25 @@ export const options = {
       executor: 'ramping-vus',
       startVUs: 0,
       stages: [
-        { duration: '1m', target: 100 },    // 워밍업
-        { duration: '2m', target: 300 },    // 증가
-        { duration: '2m', target: 500 },    // 증가
-        { duration: '3m', target: 1000 },   // 목표 도달
-        { duration: '5m', target: 1000 },   // 안정성 검증 (중요!)
-        { duration: '2m', target: 500 },    // 감소
+        { duration: '1m', target: 500 },    // 워밍업
+        { duration: '2m', target: 1500 },   // 증가
+        { duration: '2m', target: 2500 },   // 증가
+        { duration: '3m', target: 5000 },   // 목표 도달 (5,000명)
+        { duration: '5m', target: 5000 },   // 안정성 검증 (중요!)
+        { duration: '2m', target: 2500 },   // 감소
         { duration: '1m', target: 0 },      // 정리
       ],
       gracefulRampDown: '30s',
     },
   },
 
+  // 성능 기준 (문서 기준과 일치)
   thresholds: {
-    'ws_connection_success': ['rate>0.95'],
-    'ws_connection_time': ['p(95)<5000'],
-    'ws_message_success': ['rate>0.95'],
-    'ws_message_latency': ['p(95)<500'],
+    'ws_connection_success': ['rate>0.999'],       // 연결 성공률 99.9% 이상
+    'ws_connection_time': ['p(95)<3000'],           // 연결 시간 P95 < 3초
+    'ws_message_success': ['rate>0.99'],            // 메시지 성공률 99% 이상
+    'ws_message_latency': ['p(95)<300', 'p(99)<500'], // P95 < 300ms, P99 < 500ms
+    'ws_messages_received': ['count>0'],              // 메시지 수신 확인 (전달률은 handleSummary에서 검증)
   },
   summaryTrendStats: ['avg', 'min', 'med', 'max', 'p(90)', 'p(95)', 'p(99)'],
 };
@@ -60,9 +63,9 @@ const HTTP_URL = `http://${BASE_URL}`;
 // Setup: 테스트 데이터 생성 (Keeper, User, Post, ChatRoom)
 // =====================================================
 export function setup() {
-  console.log('Creating test data: 100 keepers, 1000 users, 100 posts, 1000 chat rooms...');
+  console.log('Creating test data: 500 keepers, 5000 users, 500 posts, 5000 chat rooms...');
 
-  const setupRes = http.post(`${HTTP_URL}/api/test/setup?keeperCount=100&userCount=1000&postCount=100`);
+  const setupRes = http.post(`${HTTP_URL}/api/test/setup?keeperCount=500&userCount=5000&postCount=500`);
   if (setupRes.status === 200) {
     const data = setupRes.json();
     console.log(`Test data created: ${data.chat_rooms_created} chat rooms ready.`);
@@ -82,7 +85,7 @@ export function setup() {
 // 플로우: 미리 생성된 채팅방에 접속 → 1대1 채팅
 // =====================================================
 export default function (data) {
-  // 1000개의 채팅방 중 하나 선택
+  // 5000개의 채팅방 중 하나 선택
   const index = (__VU - 1) % data.chatRooms.length;
   const chatRoom = data.chatRooms[index];
 
@@ -160,9 +163,11 @@ export default function (data) {
         return;
       }
 
-      // User가 메시지 전송 (5개, 1~2초 간격)
-      for (let i = 0; i < 5; i++) {
-        const delay = 1000 + Math.floor(Math.random() * 1000);  // 1~2초 랜덤
+      // User가 메시지 전송 (10개, 2~5초 간격)
+      let cumulativeDelay = 0;
+      for (let i = 0; i < 10; i++) {
+        const interval = 2000 + Math.floor(Math.random() * 3000);  // 2~5초 랜덤
+        cumulativeDelay += interval;
         socket.setTimeout(function () {
           const sendTimestamp = Date.now();
           const messageContent = JSON.stringify({
@@ -173,14 +178,22 @@ export default function (data) {
           });
           socket.send(`SEND\ndestination:/app/${roomId}/message\ncontent-type:application/json\n\n${messageContent}\0`);
           messagesSent.add(1);
-        }, (i + 1) * delay);  // 최소 1000ms (0은 허용 안됨)
+        }, cumulativeDelay);
+      }
+
+      // 읽음 상태 업데이트 3회 (메시지 전송 사이에 분산)
+      for (let j = 0; j < 3; j++) {
+        const readDelay = 3000 + (j * 8000);  // 3초, 11초, 19초
+        socket.setTimeout(function () {
+          socket.send(`SEND\ndestination:/app/${roomId}/read\ncontent-type:application/json\n\n{"userId":${parseInt(userId)}}\0`);
+        }, readDelay);
       }
     }, 500);
 
-    // 15초 후 연결 종료 (실제 채팅 시뮬레이션)
+    // 30초 후 연결 종료 (실제 채팅 시뮬레이션)
     socket.setTimeout(function () {
       socket.close();
-    }, 15000);
+    }, 30000);
   });
 
   // 연결 결과 판정
@@ -197,11 +210,14 @@ export default function (data) {
 export function handleSummary(data) {
   const metrics = data.metrics;
   const testDuration = (data.state.testRunDurationMs / 1000).toFixed(2);
+  const totalSent = metrics.ws_messages_sent?.values.count || 0;
+  const totalReceived = metrics.ws_messages_received?.values.count || 0;
+  const deliveryRate = totalSent > 0 ? ((totalReceived / totalSent) * 100).toFixed(2) : '0.00';
 
   const summary = {
     test_info: {
       name: 'WebSocket Chat Load Test (1:1 Chat Flow)',
-      target_vus: 1000,
+      target_vus: 5000,
       duration_seconds: testDuration,
       timestamp: new Date().toISOString(),
     },
@@ -213,8 +229,9 @@ export function handleSummary(data) {
       p99_time: `${(metrics.ws_connection_time?.values['p(99)'] || 0).toFixed(2)}ms`,
     },
     message: {
-      total_sent: metrics.ws_messages_sent?.values.count || 0,
-      total_received: metrics.ws_messages_received?.values.count || 0,
+      total_sent: totalSent,
+      total_received: totalReceived,
+      delivery_rate: `${deliveryRate}%`,
       success_rate: `${((metrics.ws_message_success?.values.rate || 0) * 100).toFixed(2)}%`,
       avg_latency: `${(metrics.ws_message_latency?.values.avg || 0).toFixed(2)}ms`,
       p50_latency: `${(metrics.ws_message_latency?.values['p(50)'] || metrics.ws_message_latency?.values.med || 0).toFixed(2)}ms`,
@@ -223,16 +240,19 @@ export function handleSummary(data) {
       max_latency: `${(metrics.ws_message_latency?.values.max || 0).toFixed(2)}ms`,
     },
     throughput: {
-      messages_per_second: ((metrics.ws_messages_sent?.values.count || 0) / parseFloat(testDuration)).toFixed(2),
+      messages_per_second: (totalSent / parseFloat(testDuration)).toFixed(2),
     },
   };
+
+  // PASS/FAIL 판정 (보고서 기준)
+  const deliveryPass = parseFloat(deliveryRate) >= 99.0;
 
   console.log('\n' + '='.repeat(60));
   console.log('  WEBSOCKET LOAD TEST RESULTS (1:1 Chat Flow)');
   console.log('='.repeat(60));
   console.log(`\n[Test Info]`);
   console.log(`  Duration: ${testDuration}s`);
-  console.log(`  Target VUs: 1000`);
+  console.log(`  Target VUs: 5000`);
   console.log(`\n[Connection Performance]`);
   console.log(`  Success Rate: ${summary.connection.success_rate}`);
   console.log(`  Avg Time: ${summary.connection.avg_time}`);
@@ -241,6 +261,7 @@ export function handleSummary(data) {
   console.log(`\n[Message Performance]`);
   console.log(`  Total Sent: ${summary.message.total_sent}`);
   console.log(`  Total Received: ${summary.message.total_received}`);
+  console.log(`  Delivery Rate: ${summary.message.delivery_rate}  ${deliveryPass ? '✅ PASS (≥99%)' : '❌ FAIL (<99%)'}`);
   console.log(`  Success Rate: ${summary.message.success_rate}`);
   console.log(`  Avg Latency: ${summary.message.avg_latency}`);
   console.log(`  P50 Latency: ${summary.message.p50_latency}`);

@@ -57,7 +57,7 @@ public class ChatMessage {
    *
    * @param readStatus 변경할 읽음 상태
    */
-  public void updateReadStatus(boolean readStatus) {
-    this.readStatus = readStatus;
-  }
+//  public void updateReadStatus(boolean readStatus) {
+//    this.readStatus = readStatus;
+//  }
 }

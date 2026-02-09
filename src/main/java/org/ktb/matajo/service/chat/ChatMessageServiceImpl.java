@@ -160,46 +160,18 @@ public class ChatMessageServiceImpl implements ChatMessageService {
       throw new BusinessException(ErrorCode.INVALID_USER_ID);
     }
 
-    // 읽지 않은 메시지 중 다른 사용자가 보낸 메시지만 읽음 처리
-    List<ChatMessage> unreadMessages =
-        chatMessageRepository.findUnreadMessagesForUser(roomId, userId);
+    // 벌크 UPDATE로 읽음 처리 (쿼리 N번 → 1번)
+    int updatedCount = chatMessageRepository.bulkMarkAsRead(roomId, userId);
 
-    for (ChatMessage message : unreadMessages) {
-      message.updateReadStatus(true);
-    }
-
-    chatMessageRepository.saveAll(unreadMessages);
-
-    // Redis 캐시 업데이트 (캐시 무효화) - 예외 처리 추가
-    //        try {
-    //            redisChatMessageService.invalidateCache(roomId);
-    //        } catch (Exception e) {
-    //            log.warn("캐시 무효화 실패 (무시됨): {}", e.getMessage());
-    //        }
-
-    // 읽음 처리된 메시지 ID 목록 수집
-    List<Long> readMessageIds =
-        unreadMessages.stream().map(ChatMessage::getId).collect(Collectors.toList());
-
-    // 메시지 상태 업데이트 후 WebSocket으로 브로드캐스트
-    if (!readMessageIds.isEmpty()) {
+    // 읽음 처리된 메시지가 있으면 WebSocket으로 브로드캐스트
+    if (updatedCount > 0) {
       Map<String, Object> readStatusUpdate = new HashMap<>();
       readStatusUpdate.put("type", "READ_STATUS_UPDATE");
       readStatusUpdate.put("roomId", roomId);
       readStatusUpdate.put("readBy", userId);
-      readStatusUpdate.put("messageIds", readMessageIds);
+      readStatusUpdate.put("updatedCount", updatedCount);
 
       messagingTemplate.convertAndSend("/topic/chat/" + roomId + "/status", readStatusUpdate);
-
-      // 안 읽은 메시지 개수 업데이트 정보도 브로드캐스트
-      Long unreadCount = chatMessageRepository.countUnreadMessages(roomId, userId);
-      Map<String, Object> unreadCountUpdate = new HashMap<>();
-      unreadCountUpdate.put("type", "UNREAD_COUNT_UPDATE");
-      unreadCountUpdate.put("roomId", roomId);
-      unreadCountUpdate.put("userId", userId);
-      unreadCountUpdate.put("unreadCount", unreadCount);
-
-      messagingTemplate.convertAndSend("/topic/chat/unread", unreadCountUpdate);
     }
   }
 
