@@ -13,6 +13,7 @@ import org.ktb.matajo.repository.RefreshTokenRepository;
 import org.ktb.matajo.repository.UserRepository;
 import org.ktb.matajo.security.JwtUtil;
 import org.ktb.matajo.security.SecurityUtil;
+import org.ktb.matajo.service.chat.ChatCacheService;
 import org.ktb.matajo.service.oauth.KakaoAuthService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -29,18 +30,21 @@ public class UserServiceImpl implements UserService {
   private final JwtUtil jwtUtil;
   private final KakaoAuthService kakaoAuthService;
   private final KakaoUserService kakaoUserService;
+  private final ChatCacheService chatCacheService;
 
   public UserServiceImpl(
       UserRepository userRepository,
       RefreshTokenRepository refreshTokenRepository,
       JwtUtil jwtUtil,
       KakaoAuthService kakaoAuthService,
-      KakaoUserService kakaoUserService) {
+      KakaoUserService kakaoUserService,
+      ChatCacheService chatCacheService) {
     this.userRepository = userRepository;
     this.refreshTokenRepository = refreshTokenRepository;
     this.jwtUtil = jwtUtil;
     this.kakaoAuthService = kakaoAuthService;
     this.kakaoUserService = kakaoUserService;
+    this.chatCacheService = chatCacheService;
   }
 
   @Override
@@ -210,6 +214,9 @@ public class UserServiceImpl implements UserService {
 
     user.changeNickname(newNickname);
     userRepository.save(user);
+
+    // 닉네임 변경 시 유저 캐시 무효화
+    chatCacheService.evictUser(userId);
 
     // 수정된 닉네임과 role을 반영한 새 AccessToken 생성
     String newAccessToken =

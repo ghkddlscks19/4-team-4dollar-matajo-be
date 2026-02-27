@@ -15,6 +15,7 @@ import org.ktb.matajo.global.error.exception.BusinessException;
 import org.ktb.matajo.repository.ChatMessageRepository;
 import org.ktb.matajo.repository.ChatRoomRepository;
 import org.ktb.matajo.repository.UserRepository;
+import org.ktb.matajo.service.chat.ChatCacheService.UserCacheInfo;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -31,6 +32,7 @@ public class ChatMessageServiceImpl implements ChatMessageService {
   private final ChatMessageRepository chatMessageRepository;
   private final ChatRoomRepository chatRoomRepository;
   private final UserRepository userRepository;
+  private final ChatCacheService chatCacheService;
   //    private final RedisChatMessageService redisChatMessageService;
   private final SimpMessagingTemplate messagingTemplate;
 
@@ -41,25 +43,34 @@ public class ChatMessageServiceImpl implements ChatMessageService {
     // 입력 유효성 검사
     validateMessageInput(roomId, messageDto);
 
-    // 채팅방 조회
-    ChatRoom chatRoom = findChatRoom(roomId);
+    // 채팅방 존재 검증 (캐시 활용 - DB 조회 없음)
+    chatCacheService.findChatRoom(roomId);
 
-    // 발신자 조회
-    User sender = findSender(messageDto.getSenderId());
+    // 발신자 조회 (캐시 활용 - 닉네임 등 DTO용 데이터)
+    UserCacheInfo cachedSender = chatCacheService.findUser(messageDto.getSenderId());
 
     log.info("메시지 생성 전 readStatus 설정: false");
 
-    // 메시지 생성 및 저장
-    ChatMessage chatMessage = createAndSaveChatMessage(chatRoom, sender, messageDto);
+    // JPA 참조로 메시지 생성 (DB SELECT 없이 INSERT만 실행)
+    ChatRoom chatRoomRef = chatRoomRepository.getReferenceById(roomId);
+    User senderRef = userRepository.getReferenceById(messageDto.getSenderId());
+    ChatMessage chatMessage = createAndSaveChatMessage(chatRoomRef, senderRef, messageDto);
 
     // 저장 후 상태 확인
     log.info("메시지 ID: {}, 저장 후 readStatus: {}", chatMessage.getId(), chatMessage.isReadStatus());
 
-    // 응답 DTO 생성 (sendTimestamp 포함 - 레이턴시 측정용)
-    ChatMessageResponseDto responseDto =
-        convertToChatMessageResponseDto(chatMessage, messageDto.getSendTimestamp());
-
-    return responseDto;
+    // 응답 DTO 생성 (캐시된 발신자 정보 사용)
+    return ChatMessageResponseDto.builder()
+        .messageId(chatMessage.getId())
+        .roomId(roomId)
+        .senderId(cachedSender.id())
+        .senderNickname(cachedSender.nickname())
+        .content(chatMessage.getContent())
+        .messageType(chatMessage.getMessageType())
+        .readStatus(chatMessage.isReadStatus())
+        .createdAt(chatMessage.getCreatedAt())
+        .sendTimestamp(messageDto.getSendTimestamp())
+        .build();
   }
 
   /** 입력 유효성 검사 */
