@@ -28,9 +28,6 @@ public class ChatMessageResponseDto {
   @Schema(description = "메시지 타입 (TEXT, IMAGE, SYSTEM)", example = "TEXT")
   private MessageType messageType;
 
-  @Schema(description = "읽음 상태", example = "false")
-  private boolean readStatus;
-
   @Schema(description = "생성 시간", example = "2023-09-15T14:30:45")
   private LocalDateTime createdAt;
 

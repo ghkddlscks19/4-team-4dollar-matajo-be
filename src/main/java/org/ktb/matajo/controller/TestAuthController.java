@@ -1,6 +1,8 @@
 package org.ktb.matajo.controller;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
@@ -32,6 +34,7 @@ public class TestAuthController {
   private final PostRepository postRepository;
   private final ChatRoomRepository chatRoomRepository;
   private final ChatUserRepository chatUserRepository;
+  private final ChatMessageRepository chatMessageRepository;
 
   /**
    * 테스트용 JWT 토큰 생성
@@ -233,6 +236,74 @@ public class TestAuthController {
     response.put("chat_rooms", chatRooms); // [{room_id, user_id, keeper_id, post_id}, ...]
     response.put("keeper_tokens", keeperTokens);
     response.put("user_tokens", userTokens);
+    response.put("elapsed_ms", elapsed);
+
+    return ResponseEntity.ok(response);
+  }
+
+  /**
+   * 특정 채팅방에 대량 메시지 생성 (페이징 성능 테스트용)
+   *
+   * @param roomId 채팅방 ID
+   * @param count 생성할 메시지 수 (기본 100000)
+   * @param batchSize 배치 크기 (기본 1000)
+   */
+  @PostMapping("/messages/bulk")
+  @Transactional
+  public ResponseEntity<Map<String, Object>> createBulkMessages(
+      @RequestParam Long roomId,
+      @RequestParam(defaultValue = "100000") int count,
+      @RequestParam(defaultValue = "1000") int batchSize) {
+
+    log.info("대량 메시지 생성 시작: roomId={}, count={}", roomId, count);
+    long startTime = System.currentTimeMillis();
+
+    ChatRoom chatRoom =
+        chatRoomRepository
+            .findById(roomId)
+            .orElseThrow(() -> new RuntimeException("채팅방이 존재하지 않습니다: " + roomId));
+
+    // 채팅방 참여자 조회
+    List<ChatUser> chatUsers = chatUserRepository.findByUserIdAndActiveStatusIsTrue(
+        chatRoom.getUser().getId());
+
+    // 채팅방에 속한 사용자 2명 (의뢰인 + 보관인)
+    User sender1 = chatRoom.getUser();
+    User sender2 = chatRoom.getPost().getUser();
+
+    LocalDateTime baseTime = LocalDateTime.now(ZoneId.of("Asia/Seoul")).minusDays(30);
+
+    List<ChatMessage> batch = new ArrayList<>(batchSize);
+    for (int i = 0; i < count; i++) {
+      User sender = (i % 2 == 0) ? sender1 : sender2;
+      ChatMessage message =
+          ChatMessage.builder()
+              .chatRoom(chatRoom)
+              .user(sender)
+              .content("테스트 메시지 #" + (i + 1) + " - 성능 테스트용 메시지입니다.")
+              .messageType(MessageType.TEXT)
+              .createdAt(baseTime.plusSeconds(i))
+              .build();
+      batch.add(message);
+
+      if (batch.size() >= batchSize) {
+        chatMessageRepository.saveAll(batch);
+        batch.clear();
+        if ((i + 1) % 10000 == 0) {
+          log.info("메시지 생성 진행: {}/{}", i + 1, count);
+        }
+      }
+    }
+    if (!batch.isEmpty()) {
+      chatMessageRepository.saveAll(batch);
+    }
+
+    long elapsed = System.currentTimeMillis() - startTime;
+    log.info("대량 메시지 생성 완료: {}건, {}ms", count, elapsed);
+
+    Map<String, Object> response = new HashMap<>();
+    response.put("room_id", roomId);
+    response.put("messages_created", count);
     response.put("elapsed_ms", elapsed);
 
     return ResponseEntity.ok(response);

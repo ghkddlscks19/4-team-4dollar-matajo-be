@@ -31,9 +31,6 @@ public class ChatMessage {
   @Column(nullable = false)
   private MessageType messageType;
 
-  @Column(nullable = false, columnDefinition = "TINYINT(1)")
-  private boolean readStatus;
-
   @ManyToOne(fetch = FetchType.LAZY)
   @JoinColumn(
       name = "room_id",
@@ -52,12 +49,4 @@ public class ChatMessage {
   @Column(nullable = false, updatable = false)
   private LocalDateTime createdAt;
 
-  /**
-   * 읽음 상태 업데이트
-   *
-   * @param readStatus 변경할 읽음 상태
-   */
-//  public void updateReadStatus(boolean readStatus) {
-//    this.readStatus = readStatus;
-//  }
 }

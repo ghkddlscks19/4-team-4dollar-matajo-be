@@ -12,28 +12,15 @@ import org.springframework.data.redis.serializer.GenericJackson2JsonRedisSeriali
 import org.springframework.data.redis.serializer.RedisSerializationContext;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
 
-import com.fasterxml.jackson.annotation.JsonTypeInfo;
-import com.fasterxml.jackson.databind.ObjectMapper;
-import com.fasterxml.jackson.databind.SerializationFeature;
-import com.fasterxml.jackson.databind.jsontype.BasicPolymorphicTypeValidator;
-import com.fasterxml.jackson.datatype.jsr310.JavaTimeModule;
-
 @Configuration
 @EnableCaching
 public class CacheConfig {
 
   @Bean
   public RedisCacheManager cacheManager(RedisConnectionFactory connectionFactory) {
-    ObjectMapper cacheMapper = new ObjectMapper();
-    cacheMapper.registerModule(new JavaTimeModule());
-    cacheMapper.disable(SerializationFeature.WRITE_DATES_AS_TIMESTAMPS);
-    cacheMapper.activateDefaultTyping(
-        BasicPolymorphicTypeValidator.builder().allowIfBaseType(Object.class).build(),
-        ObjectMapper.DefaultTyping.NON_FINAL,
-        JsonTypeInfo.As.PROPERTY);
-
-    GenericJackson2JsonRedisSerializer serializer =
-        new GenericJackson2JsonRedisSerializer(cacheMapper);
+    // 기본 생성자: EVERYTHING 타이핑 + WRAPPER_ARRAY 방식으로
+    // final 클래스(record)와 원시 타입(boolean)에도 @class 타입 정보를 포함
+    GenericJackson2JsonRedisSerializer serializer = new GenericJackson2JsonRedisSerializer();
 
     RedisCacheConfiguration chatRoomConfig =
         RedisCacheConfiguration.defaultCacheConfig()

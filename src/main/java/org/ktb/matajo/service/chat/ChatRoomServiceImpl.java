@@ -109,7 +109,8 @@ public class ChatRoomServiceImpl implements ChatRoomService {
   }
 
   // ChatRoom 엔티티를 ChatRoomResponseDto로 변환
-  private ChatRoomResponseDto convertToChatRoomResponseDto(ChatRoom chatRoom, Long userId) {
+  private ChatRoomResponseDto convertToChatRoomResponseDto(
+      ChatRoom chatRoom, Long userId, Long lastReadMessageId) {
     Post post = chatRoom.getPost();
 
     // 상대방 정보 가져오기
@@ -156,7 +157,8 @@ public class ChatRoomServiceImpl implements ChatRoomService {
       }
     }
 
-    long unreadCount = chatMessageRepository.countUnreadMessages(chatRoom.getId(), userId);
+    long unreadCount =
+        chatMessageRepository.countUnreadByLastReadId(chatRoom.getId(), userId, lastReadMessageId);
 
     return ChatRoomResponseDto.builder()
         .chatRoomId(chatRoom.getId())
@@ -176,7 +178,10 @@ public class ChatRoomServiceImpl implements ChatRoomService {
     List<ChatUser> myChatUsers = chatUserRepository.findByUserIdAndActiveStatusIsTrue(userId);
 
     return myChatUsers.stream()
-        .map(chatUser -> convertToChatRoomResponseDto(chatUser.getChatRoom(), userId))
+        .map(
+            chatUser ->
+                convertToChatRoomResponseDto(
+                    chatUser.getChatRoom(), userId, chatUser.getLastReadMessageId()))
         .collect(Collectors.toList());
   }
 

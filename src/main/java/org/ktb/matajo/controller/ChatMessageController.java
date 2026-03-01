@@ -1,9 +1,9 @@
 package org.ktb.matajo.controller;
 
-import java.util.List;
 import java.util.Map;
 
 import org.ktb.matajo.config.WebSocketEventListener;
+import org.ktb.matajo.dto.chat.ChatMessagePageResponseDto;
 import org.ktb.matajo.dto.chat.ChatMessageRequestDto;
 import org.ktb.matajo.dto.chat.ChatMessageResponseDto;
 import org.ktb.matajo.entity.MessageType;
@@ -117,8 +117,10 @@ public class ChatMessageController {
     }
   }
 
-  /** 채팅방의 메시지 목록 조회 */
-  @Operation(summary = "채팅 메시지 목록 조회", description = "특정 채팅방의 메시지 목록을 페이징하여 조회합니다")
+  /** 채팅방의 메시지 목록 조회 (cursor 기반 페이징) */
+  @Operation(
+      summary = "채팅 메시지 목록 조회",
+      description = "특정 채팅방의 메시지 목록을 cursor 기반으로 페이징하여 조회합니다")
   @ApiResponses(
       value = {
         @ApiResponse(
@@ -132,12 +134,18 @@ public class ChatMessageController {
         @ApiResponse(responseCode = "404", description = "채팅방 없음")
       })
   @GetMapping("/{roomId}/message")
-  public ResponseEntity<CommonResponse<List<ChatMessageResponseDto>>> getChatMessages(
-      @Parameter(description = "채팅방 ID", required = true) @PathVariable Long roomId) {
+  public ResponseEntity<CommonResponse<ChatMessagePageResponseDto>> getChatMessages(
+      @Parameter(description = "채팅방 ID", required = true) @PathVariable Long roomId,
+      @Parameter(description = "마지막으로 받은 메시지 ID (없으면 최신부터)")
+          @RequestParam(required = false)
+          Long cursor,
+      @Parameter(description = "조회 개수 (기본 20)")
+          @RequestParam(defaultValue = "20")
+          int size) {
 
-    log.info("채팅 메시지 조회: roomId={}", roomId);
+    log.info("채팅 메시지 조회: roomId={}, cursor={}, size={}", roomId, cursor, size);
 
-    List<ChatMessageResponseDto> messages = chatMessageService.getChatMessages(roomId);
+    ChatMessagePageResponseDto messages = chatMessageService.getChatMessages(roomId, cursor, size);
 
     return ResponseEntity.status(HttpStatus.OK)
         .body(CommonResponse.success("get_messages_success", messages));

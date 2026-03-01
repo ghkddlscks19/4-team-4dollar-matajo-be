@@ -43,6 +43,10 @@ public class ChatUser {
   @Column(nullable = false, columnDefinition = "TINYINT(1)")
   private boolean activeStatus;
 
+  @Column(nullable = false)
+  @Builder.Default
+  private Long lastReadMessageId = 0L;
+
   @CreationTimestamp
   @Column(nullable = false, updatable = false)
   private LocalDateTime joinedAt;
@@ -59,5 +63,12 @@ public class ChatUser {
   public void rejoin() {
     this.activeStatus = true;
     this.leftAt = null;
+  }
+
+  // 마지막 읽은 메시지 ID 갱신
+  public void updateLastReadMessageId(Long messageId) {
+    if (messageId != null && messageId > this.lastReadMessageId) {
+      this.lastReadMessageId = messageId;
+    }
   }
 }

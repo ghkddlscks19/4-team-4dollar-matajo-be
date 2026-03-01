@@ -138,6 +138,7 @@ CREATE TABLE IF NOT EXISTS chat_user (
     room_id BIGINT NOT NULL,
     user_id BIGINT NOT NULL,
     active_status TINYINT(1) NOT NULL DEFAULT 1,
+    last_read_message_id BIGINT NOT NULL DEFAULT 0,
     joined_at DATETIME NOT NULL,
     left_at DATETIME,
     INDEX idx_chat_user_room_id (room_id),
@@ -149,12 +150,12 @@ CREATE TABLE IF NOT EXISTS chat_message (
     id BIGINT AUTO_INCREMENT PRIMARY KEY,
     content TEXT NOT NULL,
     message_type TINYINT NOT NULL DEFAULT 1,
-    read_status TINYINT(1) NOT NULL DEFAULT 0,
     room_id BIGINT NOT NULL,
     sender_id BIGINT NOT NULL,
     created_at DATETIME NOT NULL,
     INDEX idx_chat_message_room_id (room_id),
-    INDEX idx_chat_message_sender_id (sender_id)
+    INDEX idx_chat_message_sender_id (sender_id),
+    INDEX idx_chat_message_room_id_desc (room_id, id DESC)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- 11. trade_info 테이블
@@ -354,20 +355,20 @@ INSERT INTO chat_user (room_id, user_id, active_status, joined_at) VALUES
 (10, 15, 1, NOW()), (10, 4, 1, NOW());
 
 -- chat_message 테스트 데이터
-INSERT INTO chat_message (room_id, sender_id, content, message_type, read_status, created_at) VALUES
-(1, 6, '안녕하세요! 보관 문의드립니다.', 1, 1, NOW()),
-(1, 1, '네, 안녕하세요! 어떤 물건을 보관하실 건가요?', 1, 1, NOW()),
-(1, 6, '캐리어 하나 보관하려고 합니다.', 1, 0, NOW()),
-(2, 7, '보관 가능한가요?', 1, 1, NOW()),
-(2, 1, '네, 가능합니다!', 1, 0, NOW()),
-(3, 8, '가격 협의 가능할까요?', 1, 1, NOW()),
-(3, 2, '어느 정도 생각하시나요?', 1, 0, NOW()),
-(4, 9, '언제부터 보관 가능한가요?', 1, 0, NOW()),
-(5, 10, '보관소 위치가 어디인가요?', 1, 1, NOW()),
-(5, 4, '잠실역 8번출구 바로 앞입니다.', 1, 0, NOW());
+INSERT INTO chat_message (room_id, sender_id, content, message_type, created_at) VALUES
+(1, 6, '안녕하세요! 보관 문의드립니다.', 1, NOW()),
+(1, 1, '네, 안녕하세요! 어떤 물건을 보관하실 건가요?', 1, NOW()),
+(1, 6, '캐리어 하나 보관하려고 합니다.', 1, NOW()),
+(2, 7, '보관 가능한가요?', 1, NOW()),
+(2, 1, '네, 가능합니다!', 1, NOW()),
+(3, 8, '가격 협의 가능할까요?', 1, NOW()),
+(3, 2, '어느 정도 생각하시나요?', 1, NOW()),
+(4, 9, '언제부터 보관 가능한가요?', 1, NOW()),
+(5, 10, '보관소 위치가 어디인가요?', 1, NOW()),
+(5, 4, '잠실역 8번출구 바로 앞입니다.', 1, NOW());
 
 -- 추가 메시지 (부하 테스트용 100개)
-INSERT INTO chat_message (room_id, sender_id, content, message_type, read_status, created_at)
+INSERT INTO chat_message (room_id, sender_id, content, message_type, created_at)
 SELECT
     (nums.n % 10) + 1,
     CASE
@@ -376,7 +377,6 @@ SELECT
     END,
     CONCAT('테스트 메시지입니다. 안녕하세요! 번호: ', nums.n),
     1,
-    nums.n % 2,
     DATE_ADD(NOW(), INTERVAL nums.n SECOND)
 FROM (
     SELECT (a.N + b.N * 10 + 1) as n

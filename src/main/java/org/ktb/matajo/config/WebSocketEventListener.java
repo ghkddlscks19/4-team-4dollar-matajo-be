@@ -338,7 +338,6 @@ public class WebSocketEventListener {
               .senderNickname("시스템")
               .content(content)
               .messageType(MessageType.SYSTEM)
-              .readStatus(true)
               .createdAt(LocalDateTime.now())
               .build();
 
