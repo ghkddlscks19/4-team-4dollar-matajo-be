@@ -1,141 +1,85 @@
 package org.ktb.matajo.service.notification;
 
+import org.ktb.matajo.dto.chat.ChatMessageResponseDto;
+import org.ktb.matajo.entity.ChatRoom;
+import org.ktb.matajo.entity.User;
+import org.ktb.matajo.repository.ChatRoomRepository;
+import org.ktb.matajo.repository.UserRepository;
+import org.springframework.scheduling.annotation.Async;
+import org.springframework.stereotype.Service;
+
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.ktb.matajo.dto.chat.ChatMessageResponseDto;
-import org.ktb.matajo.dto.chat.ChatRoomDetailResponseDto;
-import org.ktb.matajo.entity.User;
-import org.ktb.matajo.global.error.code.ErrorCode;
-import org.ktb.matajo.global.error.exception.BusinessException;
-import org.ktb.matajo.repository.UserRepository;
-import org.ktb.matajo.service.chat.ChatRoomService;
-import org.ktb.matajo.service.chat.ChatSessionService;
-import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
-
-import java.util.Set;
 
 @Service
 @Slf4j
 @RequiredArgsConstructor
-@Transactional(readOnly = true)
 public class NotificationServiceImpl implements NotificationService {
-    private final ChatRoomService chatRoomService;
-    private final ChatSessionService chatSessionService;
-    private final UserRepository userRepository;
-    private final FirebaseNotificationService firebaseNotificationService;
+  private final ChatRoomRepository chatRoomRepository;
+  private final UserRepository userRepository;
+  private final FirebaseNotificationService firebaseNotificationService;
 
-    @Override
-    public void sendChatNotification(ChatMessageResponseDto messageDto, Long currentUserId) {
-        // 입력 유효성 검사
-        validateNotificationInput(messageDto, currentUserId);
-
-        try {
-            // 채팅방 상세 정보 조회
-            ChatRoomDetailResponseDto roomDetail = getChatRoomDetail(messageDto, currentUserId);
-
-            // 수신자 정보 조회
-            User receiverUser = findReceiverUser(roomDetail, currentUserId);
-
-            // 알림 전송 조건 확인
-            if (shouldSendNotification(messageDto, receiverUser)) {
-                sendFirebaseNotification(messageDto, receiverUser);
-            } else {
-                log.debug("FCM 알림 전송 생략: receiverId={}, activeInRoom={}, hasFcmToken={}",
-                        receiverUser.getId(),
-                        isReceiverActiveInRoom(messageDto, receiverUser.getId()),
-                        receiverUser.getFcmToken() != null
-                );
-            }
-        } catch (BusinessException e) {
-            log.error("알림 전송 중 비즈니스 예외 발생: {}", e.getMessage(), e);
-            throw e;
-        } catch (Exception e) {
-            log.error("알림 전송 중 예상치 못한 오류 발생: {}", e.getMessage(), e);
-            throw new BusinessException(ErrorCode.FAILED_TO_SEND_NOTIFICATION);
-        }
+  @Async("notificationExecutor")
+  @Override
+  public void sendChatNotification(ChatMessageResponseDto messageDto, Long currentUserId) {
+    if (messageDto == null || currentUserId == null) {
+      log.warn("알림 전송 실패: 메시지 또는 사용자 ID가 null입니다.");
+      return;
     }
 
-    // 입력 유효성 검사
-    private void validateNotificationInput(ChatMessageResponseDto messageDto, Long currentUserId) {
-        if (messageDto == null) {
-            log.warn("알림 전송 실패: 메시지가 null입니다.");
-            throw new BusinessException(ErrorCode.NOTIFICATION_MESSAGE_INVALID);
-        }
+    try {
+      // FETCH JOIN으로 ChatRoom + 의뢰인 + Post + 보관인을 한 번에 조회
+      ChatRoom chatRoom =
+          chatRoomRepository
+              .findByIdWithUsers(messageDto.getRoomId())
+              .orElse(null);
 
-        if (currentUserId == null) {
-            log.warn("알림 전송 실패: 사용자 ID가 null입니다.");
-            throw new BusinessException(ErrorCode.NOTIFICATION_MESSAGE_INVALID);
-        }
+      if (chatRoom == null) {
+        log.warn("알림 전송 실패: 채팅방을 찾을 수 없습니다. roomId={}", messageDto.getRoomId());
+        return;
+      }
+
+      // 수신자 결정: chatRoom.user = 의뢰인, chatRoom.post.user = 보관인
+      Long clientId = chatRoom.getUser().getId();
+      Long keeperId = chatRoom.getPost().getUser().getId();
+      Long receiverId = currentUserId.equals(keeperId) ? clientId : keeperId;
+
+      // 자기 자신에게 알림 전송 방지
+      if (receiverId.equals(currentUserId)) {
+        return;
+      }
+
+      // 수신자 조회 (FCM 토큰 필요)
+      User receiverUser =
+          userRepository
+              .findById(receiverId)
+              .orElse(null);
+
+      if (receiverUser == null) {
+        log.warn("알림 전송 실패: 수신자를 찾을 수 없습니다. userId={}", receiverId);
+        return;
+      }
+
+      // FCM 토큰 유효성 확인
+      if (receiverUser.getFcmToken() == null || receiverUser.getFcmToken().isBlank()) {
+        log.debug("FCM 알림 전송 생략: 유효한 FCM 토큰 없음. receiverId={}", receiverId);
+        return;
+      }
+
+      // FCM 알림 전송
+      log.info(
+          "FCM 알림 전송 시도: receiverId={}, senderNickname={}",
+          receiverUser.getId(),
+          messageDto.getSenderNickname());
+
+      firebaseNotificationService.sendMessageNotification(
+          messageDto.getSenderNickname(),
+          messageDto,
+          receiverUser.getFcmToken(),
+          receiverUser.getId());
+
+    } catch (Exception e) {
+      log.error("알림 전송 중 오류 발생: {}", e.getMessage(), e);
     }
-
-    // 채팅방 상세 정보 조회
-    private ChatRoomDetailResponseDto getChatRoomDetail(ChatMessageResponseDto messageDto, Long currentUserId) {
-        try {
-            return chatRoomService.getChatRoomDetail(currentUserId, messageDto.getRoomId());
-        } catch (Exception e) {
-            log.error("채팅방 상세 정보 조회 실패: {}", e.getMessage());
-            throw new BusinessException(ErrorCode.CHAT_ROOM_NOT_FOUND);
-        }
-    }
-
-    // 수신자 사용자 조회
-    private User findReceiverUser(ChatRoomDetailResponseDto roomDetail, Long currentUserId) {
-        // 상대방 ID 확인 (발신자와 다른 사용자)
-        Long receiverId = currentUserId.equals(roomDetail.getKeeperId())
-                ? roomDetail.getClientId()
-                : roomDetail.getKeeperId();
-
-        return userRepository.findById(receiverId)
-                .orElseThrow(() -> {
-                    log.warn("알림 전송 실패: 수신자 사용자를 찾을 수 없습니다. userId={}", receiverId);
-                    return new BusinessException(ErrorCode.NOTIFICATION_RECEIVER_NOT_FOUND);
-                });
-    }
-
-    // 알림 전송 조건 확인
-    private boolean shouldSendNotification(ChatMessageResponseDto messageDto, User receiverUser) {
-//        // 조건 1: 수신자가 채팅방에 없음
-//        boolean isReceiverNotActive = !isReceiverActiveInRoom(messageDto, receiverUser.getId());
-//
-//        // 조건 2: FCM 토큰이 유효함
-//        boolean hasValidFcmToken = receiverUser.getFcmToken() != null
-//                && !receiverUser.getFcmToken().isBlank();
-//
-//        return isReceiverNotActive && hasValidFcmToken;
-
-        // FCM 토큰이 유효한지만 확인
-        boolean hasValidFcmToken = receiverUser.getFcmToken() != null
-                && !receiverUser.getFcmToken().isBlank();
-
-        // 자신이 보낸 메시지에는 알림 안 보내기
-        boolean isOwnMessage = messageDto.getSenderId().equals(receiverUser.getId());
-
-        return hasValidFcmToken && !isOwnMessage;
-    }
-
-    // 수신자가 채팅방에 활성화되어 있는지 확인
-    private boolean isReceiverActiveInRoom(ChatMessageResponseDto messageDto, Long receiverId) {
-        Set<Long> activeUsersInRoom = chatSessionService.getActiveUsersInRoom(messageDto.getRoomId());
-        return activeUsersInRoom.contains(receiverId);
-    }
-
-    // Firebase 알림 전송
-    private void sendFirebaseNotification(ChatMessageResponseDto messageDto, User receiverUser) {
-        log.info("🔔 FCM 알림 전송 시도: receiverId={}, senderNickname={}, fcmToken={}",
-                receiverUser.getId(), messageDto.getSenderNickname(), receiverUser.getFcmToken());
-        try {
-            firebaseNotificationService.sendMessageNotification(
-                    messageDto.getSenderNickname(),
-                    messageDto,
-                    receiverUser.getFcmToken(),
-                    receiverUser.getId()
-            );
-            log.info("FCM 알림 전송 성공: receiverId={}, senderNickname={}",
-                    receiverUser.getId(), messageDto.getSenderNickname());
-        } catch (Exception e) {
-            log.error("Firebase 알림 전송 실패: {}", e.getMessage(), e);
-            throw new BusinessException(ErrorCode.FAILED_TO_SEND_NOTIFICATION);
-        }
-    }
+  }
 }

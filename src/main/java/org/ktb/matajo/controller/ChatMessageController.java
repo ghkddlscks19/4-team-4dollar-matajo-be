@@ -1,5 +1,25 @@
 package org.ktb.matajo.controller;
 
+import java.util.Map;
+
+import org.ktb.matajo.config.WebSocketEventListener;
+import org.ktb.matajo.dto.chat.ChatMessagePageResponseDto;
+import org.ktb.matajo.dto.chat.ChatMessageRequestDto;
+import org.ktb.matajo.dto.chat.ChatMessageResponseDto;
+import org.ktb.matajo.entity.MessageType;
+import org.ktb.matajo.global.common.CommonResponse;
+import org.ktb.matajo.service.chat.ChatMessageService;
+import org.ktb.matajo.service.chat.ChatSessionService;
+import org.ktb.matajo.service.notification.NotificationService;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.ResponseEntity;
+import org.springframework.messaging.handler.annotation.DestinationVariable;
+import org.springframework.messaging.handler.annotation.MessageMapping;
+import org.springframework.messaging.handler.annotation.Payload;
+import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
+import org.ktb.matajo.service.chat.BroadcastMessagingService;
+import org.springframework.web.bind.annotation.*;
+
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.Parameter;
 import io.swagger.v3.oas.annotations.media.Content;
@@ -10,27 +30,6 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.ktb.matajo.config.WebSocketEventListener;
-import org.ktb.matajo.dto.chat.ChatMessageRequestDto;
-import org.ktb.matajo.dto.chat.ChatMessageResponseDto;
-import org.ktb.matajo.entity.MessageType;
-import org.ktb.matajo.global.common.CommonResponse;
-import org.ktb.matajo.security.SecurityUtil;
-import org.ktb.matajo.service.chat.ChatMessageService;
-import org.ktb.matajo.service.chat.ChatSessionService;
-import org.ktb.matajo.service.notification.NotificationService;
-import org.springframework.http.HttpStatus;
-import org.springframework.http.ResponseEntity;
-import org.springframework.messaging.handler.annotation.DestinationVariable;
-import org.springframework.messaging.handler.annotation.MessageMapping;
-import org.springframework.messaging.handler.annotation.Payload;
-import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
-import org.springframework.web.bind.annotation.*;
-
-import java.util.List;
-import java.util.Map;
-import java.util.Set;
 
 @RestController
 @RequestMapping("/api/chats")
@@ -39,150 +38,169 @@ import java.util.Set;
 @Tag(name = "채팅 메시지", description = "채팅 메시지 관련 API")
 public class ChatMessageController {
 
-    private final ChatMessageService chatMessageService;
-    private final SimpMessagingTemplate messagingTemplate;
-    private final ChatSessionService chatSessionService;
-    private final WebSocketEventListener webSocketEventListener;
+  private final ChatMessageService chatMessageService;
+  private final BroadcastMessagingService broadcastMessagingService;
+  private final ChatSessionService chatSessionService;
+  private final WebSocketEventListener webSocketEventListener;
+  private final NotificationService notificationService;
 
-    /**
-     * 클라이언트 Heartbeat 처리 (연결 상태 확인)
-     */
-    @Operation(summary = "WebSocket Heartbeat", description = "WebSocket 연결 상태를 유지하기 위한 Heartbeat 메시지 (WebSocket API)")
-    @MessageMapping("/heartbeat")
-    public void handleHeartbeat(Map<String, Object> payload, SimpMessageHeaderAccessor headerAccessor) {
-        try {
-            String sessionId = headerAccessor.getSessionId();
+  /** 클라이언트 Heartbeat 처리 (연결 상태 확인) */
+  @Operation(
+      summary = "WebSocket Heartbeat",
+      description = "WebSocket 연결 상태를 유지하기 위한 Heartbeat 메시지 (WebSocket API)")
+  @MessageMapping("/heartbeat")
+  public void handleHeartbeat(
+      Map<String, Object> payload, SimpMessageHeaderAccessor headerAccessor) {
+    try {
+      String sessionId = headerAccessor.getSessionId();
 
-            // 필수 파라미터 확인
-            if (payload == null || !payload.containsKey("roomId") || !payload.containsKey("userId")) {
-                log.warn("Heartbeat 누락된 필수 파라미터: sessionId={}", sessionId);
-                return;
-            }
+      // 필수 파라미터 확인
+      if (payload == null || !payload.containsKey("roomId") || !payload.containsKey("userId")) {
+        log.warn("Heartbeat 누락된 필수 파라미터: sessionId={}", sessionId);
+        return;
+      }
 
-            Long roomId = Long.valueOf(payload.get("roomId").toString());
-            Long userId = Long.valueOf(payload.get("userId").toString());
+      Long roomId = Long.valueOf(payload.get("roomId").toString());
+      Long userId = Long.valueOf(payload.get("userId").toString());
 
-            // 세션 활성 상태 업데이트
-            webSocketEventListener.updateSessionActivity(sessionId, roomId, userId);
+      // 세션 활성 상태 업데이트
+      webSocketEventListener.updateSessionActivity(sessionId, roomId, userId);
 
-            if (log.isTraceEnabled()) {
-                log.trace("Heartbeat 수신: roomId={}, userId={}, sessionId={}",
-                        roomId, userId, sessionId);
-            }
-        } catch (Exception e) {
-            // Heartbeat 오류는 심각한 문제가 아니므로 로그만 남김
-            log.debug("Heartbeat 처리 중 오류: {}", e.getMessage());
-        }
+      if (log.isTraceEnabled()) {
+        log.trace("Heartbeat 수신: roomId={}, userId={}, sessionId={}", roomId, userId, sessionId);
+      }
+    } catch (Exception e) {
+      // Heartbeat 오류는 심각한 문제가 아니므로 로그만 남김
+      log.debug("Heartbeat 처리 중 오류: {}", e.getMessage());
+    }
+  }
+
+  /** WebSocket을 통한 메시지 전송 /app/{roomId} 엔드포인트로 메시지가 전송됨 */
+  @Operation(
+      summary = "WebSocket 메시지 전송",
+      description = "WebSocket을 통해 채팅 메시지를 전송합니다 (WebSocket API)")
+  @MessageMapping("/{roomId}/message")
+  public void sendMessage(
+      @Parameter(description = "채팅방 ID", required = true) @DestinationVariable Long roomId,
+      @Parameter(
+              description = "메시지 내용",
+              required = true,
+              schema = @Schema(implementation = ChatMessageRequestDto.class))
+          @Valid
+          @Payload
+          ChatMessageRequestDto messageDto) {
+    log.info(
+        "메시지 전송: roomId={}, senderId={}, type={}",
+        roomId,
+        messageDto.getSenderId(),
+        messageDto.getMessageType(),
+        messageDto.getMessageType().getValue());
+
+    // 이미지 메시지 처리를 위한 로그 추가
+    if (messageDto.getMessageType() == MessageType.IMAGE) {
+      log.info("이미지 메시지 처리: content(URL)={}", messageDto.getContent());
     }
 
-    /**
-     * WebSocket을 통한 메시지 전송
-     * /app/{roomId} 엔드포인트로 메시지가 전송됨
-     */
-    @Operation(summary = "WebSocket 메시지 전송", description = "WebSocket을 통해 채팅 메시지를 전송합니다 (WebSocket API)")
-    @MessageMapping("/{roomId}/message")
-    public void sendMessage(
-            @Parameter(description = "채팅방 ID", required = true)
-            @DestinationVariable Long roomId,
+    // 메시지 저장 및 처리
+    ChatMessageResponseDto response = chatMessageService.saveMessage(roomId, messageDto);
 
-            @Parameter(description = "메시지 내용", required = true, schema = @Schema(implementation = ChatMessageRequestDto.class))
-            @Valid @Payload ChatMessageRequestDto messageDto) {
-        log.info("메시지 전송: roomId={}, senderId={}, type={}", roomId, messageDto.getSenderId(), messageDto.getMessageType(), messageDto.getMessageType().getValue());
+    // 메시지를 특정 채팅방 구독자들에게 브로드캐스트
+    log.info("브로드캐스트 시작: roomId={}, messageId={}", roomId, response.getMessageId());
+    broadcastMessagingService.convertAndSend("/topic/chat/" + roomId, response);
+    log.info("브로드캐스트 완료: roomId={}", roomId);
 
-        // 이미지 메시지 처리를 위한 로그 추가
-        if (messageDto.getMessageType() == MessageType.IMAGE) {
-            log.info("이미지 메시지 처리: content(URL)={}", messageDto.getContent());
-        }
-
-        // 메시지 저장 및 처리
-        ChatMessageResponseDto response = chatMessageService.saveMessage(roomId, messageDto);
-
-        // 메시지를 특정 채팅방 구독자들에게 브로드캐스트
-        messagingTemplate.convertAndSend("/topic/chat/" + roomId, response);
-
+    // FCM 알림 비동기 전송 (@Async - 별도 스레드에서 실행)
+    try {
+      notificationService.sendChatNotification(response, messageDto.getSenderId());
+    } catch (Exception e) {
+      log.warn("채팅 알림 전송 요청 실패: {}", e.getMessage());
     }
+  }
 
-    /**
-     * 채팅방의 메시지 목록 조회
-     */
-    @Operation(summary = "채팅 메시지 목록 조회", description = "특정 채팅방의 메시지 목록을 페이징하여 조회합니다")
-    @ApiResponses(value = {
-            @ApiResponse(responseCode = "200", description = "메시지 목록 조회 성공",
-                    content = @Content(mediaType = "application/json",
-                            schema = @Schema(implementation = CommonResponse.class))),
-            @ApiResponse(responseCode = "401", description = "인증 실패"),
-            @ApiResponse(responseCode = "404", description = "채팅방 없음")
-    })
-    @GetMapping("/{roomId}/message")
-    public ResponseEntity<CommonResponse<List<ChatMessageResponseDto>>> getChatMessages(
-            @Parameter(description = "채팅방 ID", required = true)
-            @PathVariable Long roomId ) {
+  /** 채팅방의 메시지 목록 조회 (cursor 기반 페이징) */
+  @Operation(
+      summary = "채팅 메시지 목록 조회",
+      description = "특정 채팅방의 메시지 목록을 cursor 기반으로 페이징하여 조회합니다")
+  @ApiResponses(
+      value = {
+        @ApiResponse(
+            responseCode = "200",
+            description = "메시지 목록 조회 성공",
+            content =
+                @Content(
+                    mediaType = "application/json",
+                    schema = @Schema(implementation = CommonResponse.class))),
+        @ApiResponse(responseCode = "401", description = "인증 실패"),
+        @ApiResponse(responseCode = "404", description = "채팅방 없음")
+      })
+  @GetMapping("/{roomId}/message")
+  public ResponseEntity<CommonResponse<ChatMessagePageResponseDto>> getChatMessages(
+      @Parameter(description = "채팅방 ID", required = true) @PathVariable Long roomId,
+      @Parameter(description = "마지막으로 받은 메시지 ID (없으면 최신부터)")
+          @RequestParam(required = false)
+          Long cursor,
+      @Parameter(description = "조회 개수 (기본 20)")
+          @RequestParam(defaultValue = "20")
+          int size) {
 
-        log.info("채팅 메시지 조회: roomId={}", roomId);
+    log.info("채팅 메시지 조회: roomId={}, cursor={}, size={}", roomId, cursor, size);
 
-        List<ChatMessageResponseDto> messages = chatMessageService.getChatMessages(roomId);
+    ChatMessagePageResponseDto messages = chatMessageService.getChatMessages(roomId, cursor, size);
 
-        return ResponseEntity
-                .status(HttpStatus.OK)
-                .body(CommonResponse.success("get_messages_success", messages));
+    return ResponseEntity.status(HttpStatus.OK)
+        .body(CommonResponse.success("get_messages_success", messages));
+  }
+
+  //    /**
+  //     * 메시지 읽음 상태 업데이트
+  //     */
+  //    @Operation(summary = "메시지 읽음 상태 업데이트", description = "특정 채팅방의 메시지를 모두 읽음 상태로 변경합니다")
+  //    @ApiResponses(value = {
+  //            @ApiResponse(responseCode = "200", description = "읽음 처리 성공"),
+  //            @ApiResponse(responseCode = "401", description = "인증 실패"),
+  //            @ApiResponse(responseCode = "404", description = "채팅방 없음")
+  //    })
+  //    @PutMapping("/{roomId}/read")
+  //    public ResponseEntity<CommonResponse<Void>> markMessagesAsRead(
+  //            @Parameter(description = "채팅방 ID", required = true)
+  //            @PathVariable Long roomId) {
+  //
+  //        // 토큰에서 userId 추출
+  //        Long userId = SecurityUtil.getCurrentUserId();
+  //
+  //        log.info("메시지 읽음 처리: roomId={}, userId={}", roomId, userId);
+  //
+  //        chatMessageService.markMessagesAsRead(roomId, userId);
+  //
+  //        return ResponseEntity
+  //                .status(HttpStatus.OK)
+  //                .body(CommonResponse.success("messages_marked_as_read", null));
+  //    }
+
+  /** WebSocket을 통한 메시지 읽음 상태 업데이트 */
+  @MessageMapping("/{roomId}/read")
+  public void markMessagesAsRead(
+      @DestinationVariable Long roomId, @Payload Map<String, Object> payload) {
+
+    try {
+      // 페이로드에서 userId 추출
+      Long userId = Long.valueOf(payload.get("userId").toString());
+
+      log.info("WebSocket 읽음 상태 처리: roomId={}, userId={}", roomId, userId);
+
+      // 메시지 읽음 상태 업데이트
+      chatMessageService.markMessagesAsRead(roomId, userId);
+
+      // 읽음 상태 변경을 모든 구독자에게 브로드캐스트하는 로직은
+      // ChatMessageServiceImpl에서 이미 처리하고 있습니다.
+    } catch (Exception e) {
+      log.error("WebSocket 읽음 상태 처리 중 오류: {}", e.getMessage(), e);
+      // 오류 메시지를 특정 사용자에게 전송
+      if (payload.containsKey("userId")) {
+        Long userId = Long.valueOf(payload.get("userId").toString());
+        broadcastMessagingService.convertAndSendToUser(
+            userId.toString(), "/queue/errors", "읽음 상태 처리 중 오류가 발생했습니다.");
+      }
     }
-
-//    /**
-//     * 메시지 읽음 상태 업데이트
-//     */
-//    @Operation(summary = "메시지 읽음 상태 업데이트", description = "특정 채팅방의 메시지를 모두 읽음 상태로 변경합니다")
-//    @ApiResponses(value = {
-//            @ApiResponse(responseCode = "200", description = "읽음 처리 성공"),
-//            @ApiResponse(responseCode = "401", description = "인증 실패"),
-//            @ApiResponse(responseCode = "404", description = "채팅방 없음")
-//    })
-//    @PutMapping("/{roomId}/read")
-//    public ResponseEntity<CommonResponse<Void>> markMessagesAsRead(
-//            @Parameter(description = "채팅방 ID", required = true)
-//            @PathVariable Long roomId) {
-//
-//        // 토큰에서 userId 추출
-//        Long userId = SecurityUtil.getCurrentUserId();
-//
-//        log.info("메시지 읽음 처리: roomId={}, userId={}", roomId, userId);
-//
-//        chatMessageService.markMessagesAsRead(roomId, userId);
-//
-//        return ResponseEntity
-//                .status(HttpStatus.OK)
-//                .body(CommonResponse.success("messages_marked_as_read", null));
-//    }
-
-    /**
-     * WebSocket을 통한 메시지 읽음 상태 업데이트
-     */
-    @MessageMapping("/{roomId}/read")
-    public void markMessagesAsRead(
-            @DestinationVariable Long roomId,
-            @Payload Map<String, Object> payload) {
-
-        try {
-            // 페이로드에서 userId 추출
-            Long userId = Long.valueOf(payload.get("userId").toString());
-
-            log.info("WebSocket 읽음 상태 처리: roomId={}, userId={}", roomId, userId);
-
-            // 메시지 읽음 상태 업데이트
-            chatMessageService.markMessagesAsRead(roomId, userId);
-
-            // 읽음 상태 변경을 모든 구독자에게 브로드캐스트하는 로직은
-            // ChatMessageServiceImpl에서 이미 처리하고 있습니다.
-        } catch (Exception e) {
-            log.error("WebSocket 읽음 상태 처리 중 오류: {}", e.getMessage(), e);
-            // 오류 메시지를 특정 사용자에게 전송
-            if (payload.containsKey("userId")) {
-                Long userId = Long.valueOf(payload.get("userId").toString());
-                messagingTemplate.convertAndSendToUser(
-                        userId.toString(),
-                        "/queue/errors",
-                        "읽음 상태 처리 중 오류가 발생했습니다."
-                );
-            }
-        }
-    }
+  }
 }

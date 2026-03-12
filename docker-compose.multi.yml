@@ -1,0 +1,118 @@
+version: '3.8'
+
+services:
+  # 기존 단일 app 서비스 비활성화
+  app:
+    deploy:
+      replicas: 0
+
+  # App 인스턴스 1
+  app-1:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: matajo-app-1
+    restart: always
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-docker,redis-pubsub}
+      JAVA_OPTS: "-Xms512m -Xmx1024m -XX:+UseG1GC -XX:MaxGCPauseMillis=100 -Dreactor.netty.ioWorkerCount=8"
+      JWT_SECRET: mySuperSecretKeyForJWTAuthenticationShouldBeLongEnough123!
+      JWT_ACCESS_TOKEN_EXPIRATION: 3600000
+      JWT_REFRESH_TOKEN_EXPIRATION: 1209600000
+      KAKAO_CLIENT_ID: 244abed4cb1b567f33d22e14fc58a2c5
+      APP_INSTANCE_ID: instance-1
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./src/main/resources/firebase-service-account.json:/app/config/firebase-service-account.json:ro
+
+  # App 인스턴스 2
+  app-2:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: matajo-app-2
+    restart: always
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-docker,redis-pubsub}
+      JAVA_OPTS: "-Xms512m -Xmx1024m -XX:+UseG1GC -XX:MaxGCPauseMillis=100 -Dreactor.netty.ioWorkerCount=8"
+      JWT_SECRET: mySuperSecretKeyForJWTAuthenticationShouldBeLongEnough123!
+      JWT_ACCESS_TOKEN_EXPIRATION: 3600000
+      JWT_REFRESH_TOKEN_EXPIRATION: 1209600000
+      KAKAO_CLIENT_ID: 244abed4cb1b567f33d22e14fc58a2c5
+      APP_INSTANCE_ID: instance-2
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./src/main/resources/firebase-service-account.json:/app/config/firebase-service-account.json:ro
+
+  # App 인스턴스 3
+  app-3:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: matajo-app-3
+    restart: always
+    environment:
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-docker,redis-pubsub}
+      JAVA_OPTS: "-Xms512m -Xmx1024m -XX:+UseG1GC -XX:MaxGCPauseMillis=100 -Dreactor.netty.ioWorkerCount=8"
+      JWT_SECRET: mySuperSecretKeyForJWTAuthenticationShouldBeLongEnough123!
+      JWT_ACCESS_TOKEN_EXPIRATION: 3600000
+      JWT_REFRESH_TOKEN_EXPIRATION: 1209600000
+      KAKAO_CLIENT_ID: 244abed4cb1b567f33d22e14fc58a2c5
+      APP_INSTANCE_ID: instance-3
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    volumes:
+      - ./src/main/resources/firebase-service-account.json:/app/config/firebase-service-account.json:ro
+
+  # Nginx 로드밸런서
+  nginx:
+    image: nginx:alpine
+    container_name: matajo-nginx
+    restart: always
+    ports:
+      - "8080:80"
+    volumes:
+      - ./docker/nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - app-1
+      - app-2
+      - app-3
+
+  # RabbitMQ (rabbitmq 프로파일에서만 사용)
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: matajo-rabbitmq
+    restart: always
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+      - "61613:61613"
+    environment:
+      RABBITMQ_DEFAULT_USER: guest
+      RABBITMQ_DEFAULT_PASS: guest
+    command: >
+      bash -c "rabbitmq-plugins enable rabbitmq_stomp && rabbitmq-server"
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "check_running"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    profiles:
+      - rabbitmq
+
+  # Prometheus - 멀티 인스턴스 설정 오버라이드
+  prometheus:
+    volumes:
+      - ./docker/prometheus-multi.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus

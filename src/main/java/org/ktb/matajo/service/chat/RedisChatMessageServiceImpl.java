@@ -1,29 +1,29 @@
-//package org.ktb.matajo.service.chat;
+// package org.ktb.matajo.service.chat;
 //
-//import com.fasterxml.jackson.databind.ObjectMapper;
-//import com.fasterxml.jackson.databind.module.SimpleModule;
-//import com.fasterxml.jackson.datatype.jsr310.deser.LocalDateTimeDeserializer;
-//import lombok.RequiredArgsConstructor;
-//import lombok.extern.slf4j.Slf4j;
-//import org.ktb.matajo.dto.chat.ChatMessageResponseDto;
-//import org.springframework.data.redis.core.RedisTemplate;
-//import org.springframework.stereotype.Service;
+// import com.fasterxml.jackson.databind.ObjectMapper;
+// import com.fasterxml.jackson.databind.module.SimpleModule;
+// import com.fasterxml.jackson.datatype.jsr310.deser.LocalDateTimeDeserializer;
+// import lombok.RequiredArgsConstructor;
+// import lombok.extern.slf4j.Slf4j;
+// import org.ktb.matajo.dto.chat.ChatMessageResponseDto;
+// import org.springframework.data.redis.core.RedisTemplate;
+// import org.springframework.stereotype.Service;
 //
-//import java.time.LocalDateTime;
-//import java.time.format.DateTimeFormatter;
-//import java.util.Collections;
-//import java.util.List;
-//import java.util.Map;
-//import java.util.concurrent.TimeUnit;
-//import java.util.stream.Collectors;
+// import java.time.LocalDateTime;
+// import java.time.format.DateTimeFormatter;
+// import java.util.Collections;
+// import java.util.List;
+// import java.util.Map;
+// import java.util.concurrent.TimeUnit;
+// import java.util.stream.Collectors;
 //
-///**
+/// **
 // * Redis를 활용한 채팅 메시지 캐싱 서비스 구현체
 // */
-//@Service
-//@RequiredArgsConstructor
-//@Slf4j
-//public class RedisChatMessageServiceImpl implements RedisChatMessageService {
+// @Service
+// @RequiredArgsConstructor
+// @Slf4j
+// public class RedisChatMessageServiceImpl implements RedisChatMessageService {
 //
 //    private final RedisTemplate<String, Object> redisTemplate;
 //    private final ObjectMapper objectMapper;
@@ -33,7 +33,8 @@
 //    // Redis 캐시 만료 시간 (24시간)
 //    private static final long CACHE_TTL_HOURS = 24;
 //    // 날짜 포맷
-//    private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy.MM.dd HH:mm:ss");
+//    private static final DateTimeFormatter DATE_FORMAT = DateTimeFormatter.ofPattern("yyyy.MM.dd
+// HH:mm:ss");
 //
 //    /**
 //     * 단일 메시지 캐싱
@@ -100,7 +101,8 @@
 //            // LocalDateTime 처리를 위한 커스텀 ObjectMapper 생성
 //            ObjectMapper dateMapper = objectMapper.copy();
 //            SimpleModule module = new SimpleModule();
-//            module.addDeserializer(LocalDateTime.class, new LocalDateTimeDeserializer(DATE_FORMAT));
+//            module.addDeserializer(LocalDateTime.class, new
+// LocalDateTimeDeserializer(DATE_FORMAT));
 //            dateMapper.registerModule(module);
 //
 //            // LinkedHashMap -> ChatMessageResponseDto 변환 로직 수정
@@ -113,11 +115,13 @@
 //                                Map<String, Object> mapMsg = (Map<String, Object>) msg;
 //
 //                                // createdAt 필드가 문자열인 경우 직접 처리
-//                                if (mapMsg.containsKey("created_at") && mapMsg.get("created_at") instanceof String) {
+//                                if (mapMsg.containsKey("created_at") && mapMsg.get("created_at")
+// instanceof String) {
 //                                    String dateStr = (String) mapMsg.get("created_at");
 //                                    try {
 //                                        // 문자열을 LocalDateTime으로 파싱
-//                                        LocalDateTime dateTime = LocalDateTime.parse(dateStr, DATE_FORMAT);
+//                                        LocalDateTime dateTime = LocalDateTime.parse(dateStr,
+// DATE_FORMAT);
 //                                        mapMsg.put("created_at", dateTime);
 //                                    } catch (Exception e) {
 //                                        log.warn("날짜 변환 실패: {} - {}", dateStr, e.getMessage());
@@ -125,7 +129,8 @@
 //                                }
 //
 //                                // 커스텀 ObjectMapper로 변환
-//                                return dateMapper.convertValue(mapMsg, ChatMessageResponseDto.class);
+//                                return dateMapper.convertValue(mapMsg,
+// ChatMessageResponseDto.class);
 //                            } else {
 //                                log.warn("알 수 없는 메시지 타입: {}", msg.getClass().getName());
 //                                return null;
@@ -156,4 +161,4 @@
 //            log.error("채팅방 캐시 무효화 중 오류 발생: {}", e.getMessage(), e);
 //        }
 //    }
-//}
+// }

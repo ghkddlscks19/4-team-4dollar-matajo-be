@@ -9,6 +9,6 @@ import lombok.*;
 @Builder
 @Schema(description = "채팅방 생성 응답 DTO")
 public class ChatRoomCreateResponseDto {
-    @Schema(description = "생성된 채팅방 ID", example = "1")
-    private Long id; // 채팅 ID
+  @Schema(description = "생성된 채팅방 ID", example = "1")
+  private Long id; // 채팅 ID
 }

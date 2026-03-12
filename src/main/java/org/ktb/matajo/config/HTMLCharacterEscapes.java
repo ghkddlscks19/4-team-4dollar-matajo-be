@@ -1,11 +1,11 @@
-//package org.ktb.matajo.config;
+// package org.ktb.matajo.config;
 //
-//import com.fasterxml.jackson.core.SerializableString;
-//import com.fasterxml.jackson.core.io.CharacterEscapes;
-//import com.fasterxml.jackson.core.io.SerializedString;
-//import org.apache.commons.text.StringEscapeUtils;
+// import com.fasterxml.jackson.core.SerializableString;
+// import com.fasterxml.jackson.core.io.CharacterEscapes;
+// import com.fasterxml.jackson.core.io.SerializedString;
+// import org.apache.commons.text.StringEscapeUtils;
 //
-//public class HTMLCharacterEscapes extends CharacterEscapes {
+// public class HTMLCharacterEscapes extends CharacterEscapes {
 //
 //    private final int[] asciiEscapes;
 //
@@ -31,4 +31,4 @@
 //    public SerializableString getEscapeSequence(int i) {
 //        return new SerializedString(StringEscapeUtils.escapeHtml4(Character.toString((char) i)));
 //    }
-//}
+// }

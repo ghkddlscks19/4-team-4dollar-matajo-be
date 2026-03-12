@@ -1,13 +1,13 @@
-//package org.ktb.matajo.service.chat;
+// package org.ktb.matajo.service.chat;
 //
-//import org.ktb.matajo.dto.chat.ChatMessageResponseDto;
+// import org.ktb.matajo.dto.chat.ChatMessageResponseDto;
 //
-//import java.util.List;
+// import java.util.List;
 //
-///**
+/// **
 // * Redis를 활용한 채팅 메시지 캐싱 서비스 인터페이스
 // */
-//public interface RedisChatMessageService {
+// public interface RedisChatMessageService {
 //
 //    /**
 //     * 단일 메시지 캐싱
@@ -40,4 +40,4 @@
 //     * @param roomId 채팅방 ID
 //     */
 //    void invalidateCache(Long roomId);
-//}
+// }
