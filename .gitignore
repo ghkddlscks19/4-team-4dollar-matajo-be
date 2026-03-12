@@ -45,11 +45,14 @@ src/main/resources/application-dev.yml
 src/main/resources/application-prod.yml
 src/main/resources/application-aws.yml
 src/main/resources/application-docker.yml
+src/main/resources/application-rabbitmq.yml
+src/main/resources/application-redis-pubsub.yml
 src/main/resources/firebase-service-account.json
 docker-compose.yml
 Dockerfile
 
 k6/
 docker/
+deploy/
 .gemini-clipboard/
 
