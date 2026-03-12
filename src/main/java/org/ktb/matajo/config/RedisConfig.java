@@ -1,9 +1,11 @@
 package org.ktb.matajo.config;
 
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.data.redis.connection.RedisConnectionFactory;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.data.redis.listener.ChannelTopic;
 import org.springframework.data.redis.listener.RedisMessageListenerContainer;
 import org.springframework.data.redis.serializer.Jackson2JsonRedisSerializer;
 import org.springframework.data.redis.serializer.StringRedisSerializer;
@@ -50,5 +52,15 @@ public class RedisConfig {
     RedisMessageListenerContainer container = new RedisMessageListenerContainer();
     container.setConnectionFactory(connectionFactory);
     return container;
+  }
+
+  /** Redis Pub/Sub 브로커 모드일 때 ws:broadcast 채널 리스너 등록 */
+  @Bean
+  @ConditionalOnProperty(name = "broker.type", havingValue = "redis", matchIfMissing = true)
+  public ChannelTopic wsBroadcastTopic(
+      RedisMessageListenerContainer container, RedisMessageBridge bridge) {
+    ChannelTopic topic = new ChannelTopic(RedisMessageBridge.CHANNEL);
+    container.addMessageListener(bridge, topic);
+    return topic;
   }
 }

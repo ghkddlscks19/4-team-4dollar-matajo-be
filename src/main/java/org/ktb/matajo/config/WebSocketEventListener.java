@@ -14,7 +14,7 @@ import org.ktb.matajo.global.error.exception.BusinessException;
 import org.ktb.matajo.service.chat.ChatMessageService;
 import org.ktb.matajo.service.chat.ChatSessionService;
 import org.springframework.context.event.EventListener;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.ktb.matajo.service.chat.BroadcastMessagingService;
 import org.springframework.messaging.simp.stomp.StompHeaderAccessor;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.messaging.SessionConnectedEvent;
@@ -31,7 +31,7 @@ import lombok.extern.slf4j.Slf4j;
 public class WebSocketEventListener {
   private final ChatSessionService chatSessionService;
   private final ChatMessageService chatMessageService;
-  private final SimpMessagingTemplate messagingTemplate;
+  private final BroadcastMessagingService broadcastMessagingService;
 
   // 웹소켓 세션 ID와 구독 정보 매핑
   private final Map<String, Map<String, Long>> sessionSubscriptions = new ConcurrentHashMap<>();
@@ -43,6 +43,24 @@ public class WebSocketEventListener {
   // 마지막 활동 시간 기록 (타임아웃 감지용)
   private final Map<String, LocalDateTime> sessionLastActivity = new ConcurrentHashMap<>();
   private static final long SESSION_TIMEOUT_MINUTES = 30;
+
+  // 채팅 토픽 destination 접두사 (슬래시, 점 두 형식 모두 지원 — RabbitMQ 호환)
+  private static final String TOPIC_CHAT_SLASH = "/topic/chat/";
+  private static final String TOPIC_CHAT_DOT = "/topic/chat.";
+
+  /** 채팅 토픽 destination 여부 확인 (/topic/chat/ 또는 /topic/chat. 형식) */
+  private boolean isChatDestination(String destination) {
+    return destination != null
+        && (destination.startsWith(TOPIC_CHAT_SLASH) || destination.startsWith(TOPIC_CHAT_DOT));
+  }
+
+  /** destination에서 roomId 부분 추출 (접두사 이후 문자열) */
+  private String extractPathAfterPrefix(String destination) {
+    if (destination.startsWith(TOPIC_CHAT_SLASH)) {
+      return destination.substring(TOPIC_CHAT_SLASH.length());
+    }
+    return destination.substring(TOPIC_CHAT_DOT.length());
+  }
 
   /** 웹소켓 연결 완료 이벤트 처리 */
   @EventListener
@@ -81,16 +99,17 @@ public class WebSocketEventListener {
     // 활동 시간 업데이트
     sessionLastActivity.put(sessionId, LocalDateTime.now());
 
-    if (destination != null && destination.startsWith("/topic/chat/")) {
+    if (isChatDestination(destination)) {
       try {
         // 오류 채널 구독은 무시 ("/topic/chat/{roomId}/error")
         if (destination.contains("/error")) {
           return;
         }
 
-        // "/topic/chat/{roomId}" 형식에서 roomId 추출
-        String path = destination.substring("/topic/chat/".length());
-        String roomIdStr = path.contains("/") ? path.substring(0, path.indexOf('/')) : path;
+        // "/topic/chat/{roomId}" 또는 "/topic/chat.{roomId}" 형식에서 roomId 추출
+        String path = extractPathAfterPrefix(destination);
+        String roomIdStr = path.contains("/") ? path.substring(0, path.indexOf('/'))
+            : path.contains(".") ? path.substring(0, path.indexOf('.')) : path;
         Long roomId = Long.parseLong(roomIdStr);
 
         // 세션 속성에서 userId 확인 (핸드셰이크에서 저장한 정보)
@@ -153,7 +172,7 @@ public class WebSocketEventListener {
     // 활동 시간 업데이트
     sessionLastActivity.put(sessionId, LocalDateTime.now());
 
-    if (destination != null && destination.startsWith("/topic/chat/")) {
+    if (isChatDestination(destination)) {
       try {
         // 세션 구독 정보에서 채팅방 ID 조회
         Map<String, Long> subscriptions = sessionSubscriptions.get(sessionId);
@@ -341,7 +360,7 @@ public class WebSocketEventListener {
               .createdAt(LocalDateTime.now())
               .build();
 
-      messagingTemplate.convertAndSend("/topic/chat/" + roomId, message);
+      broadcastMessagingService.convertAndSend("/topic/chat/" + roomId, message);
     } catch (Exception e) {
       log.warn("시스템 메시지 전송 중 오류: {}", e.getMessage());
     }
@@ -351,7 +370,7 @@ public class WebSocketEventListener {
   private void sendErrorMessage(Long roomId, Long userId, String errorMessage) {
     try {
       // 특정 사용자에게만 오류 메시지 전송
-      messagingTemplate.convertAndSendToUser(
+      broadcastMessagingService.convertAndSendToUser(
           userId.toString(),
           "/queue/errors",
           ErrorResponse.builder().code("websocket_error").message(errorMessage).build());

@@ -8,6 +8,7 @@ import org.ktb.matajo.security.JwtUtil;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.core.env.Environment;
 import org.springframework.http.server.ServerHttpRequest;
 import org.springframework.http.server.ServerHttpResponse;
 import org.springframework.http.server.ServletServerHttpRequest;
@@ -44,23 +45,50 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
 
   private final ObjectMapper objectMapper;
   private final JwtUtil jwtUtil;
+  private final Environment env;
 
   // 부하 테스트용 raw WebSocket 엔드포인트 활성화 여부 (기본값: false)
   @Value("${websocket.raw-endpoint.enabled:false}")
   private boolean rawEndpointEnabled;
 
-  public WebSocketConfig(ObjectMapper objectMapper, JwtUtil jwtUtil) {
+  @Value("${broker.type:redis}")
+  private String brokerType;
+
+  @Value("${rabbitmq.stomp.port:61613}")
+  private int rabbitStompPort;
+
+  public WebSocketConfig(ObjectMapper objectMapper, JwtUtil jwtUtil, Environment env) {
     this.objectMapper = objectMapper;
     this.jwtUtil = jwtUtil;
+    this.env = env;
   }
 
   /** 메시지 브로커 설정 클라이언트 메시지 라우팅 경로와 서버 메시지 전송 경로를 정의합니다. */
   @Override
   public void configureMessageBroker(MessageBrokerRegistry registry) {
-    // /topic, /queue 접두사로 시작하는 목적지를 구독 가능하도록 설정
-    // /topic: 일대다 메시지 브로드캐스팅(채팅방 전체 메시지)
-    // /queue: 일대일 메시지 전송(개인 알림, 오류 메시지)
-    registry.enableSimpleBroker("/topic", "/queue");
+    if ("rabbitmq".equals(brokerType)) {
+      // RabbitMQ STOMP relay 모드: 자동으로 모든 인스턴스에 메시지 전달
+      String rabbitHost = env.getProperty("spring.rabbitmq.host", "rabbitmq");
+      String rabbitUser = env.getProperty("spring.rabbitmq.username", "guest");
+      String rabbitPass = env.getProperty("spring.rabbitmq.password", "guest");
+
+      registry
+          .enableStompBrokerRelay("/topic", "/queue")
+          .setRelayHost(rabbitHost)
+          .setRelayPort(rabbitStompPort)
+          .setClientLogin(rabbitUser)
+          .setClientPasscode(rabbitPass)
+          .setSystemLogin(rabbitUser)
+          .setSystemPasscode(rabbitPass)
+          .setUserDestinationBroadcast("/topic/user-destination")
+          .setUserRegistryBroadcast("/topic/user-registry");
+
+      log.info("RabbitMQ STOMP relay 브로커 설정 완료: host={}, port={}", rabbitHost, rabbitStompPort);
+    } else {
+      // Redis Pub/Sub 모드: 인메모리 브로커 + Redis로 다른 인스턴스에 전파
+      registry.enableSimpleBroker("/topic", "/queue");
+      log.info("인메모리 브로커 설정 완료 (Redis Pub/Sub 모드)");
+    }
 
     // 클라이언트에서 서버로 메시지를 보낼 때 사용할 접두사 설정
     registry.setApplicationDestinationPrefixes("/app");
@@ -166,8 +194,36 @@ public class WebSocketConfig implements WebSocketMessageBrokerConfigurer {
         .maxPoolSize(8) // 최대 스레드 수
         .queueCapacity(100); // 작업 큐 용량
 
+    // RabbitMQ용 Destination 변환 인터셉터 추가
+    if ("rabbitmq".equals(brokerType)) {
+      registration.interceptors(new RabbitMqDestinationInterceptor());
+    }
+
     // XSS 방지 인터셉터 추가 - JacksonConfig의 ObjectMapper 주입
     registration.interceptors(new XssProtectionChannelInterceptor(objectMapper));
+  }
+
+  /** RabbitMQ STOMP 호환성을 위한 Destination 변환 인터셉터 */
+  private class RabbitMqDestinationInterceptor implements ChannelInterceptor {
+    @Override
+    public Message<?> preSend(Message<?> message, MessageChannel channel) {
+      StompHeaderAccessor accessor =
+          MessageHeaderAccessor.getAccessor(message, StompHeaderAccessor.class);
+
+      if (accessor != null) {
+        StompCommand command = accessor.getCommand();
+        if (StompCommand.SUBSCRIBE.equals(command) || StompCommand.SEND.equals(command)) {
+          String destination = accessor.getDestination();
+          if (destination != null && destination.startsWith("/topic/chat/")) {
+            // /topic/chat/123 -> /topic/chat.123 변환
+            String newDestination = destination.replaceFirst("/topic/chat/", "/topic/chat.");
+            accessor.setDestination(newDestination);
+            log.debug("RabbitMQ Destination 변환: {} -> {}", destination, newDestination);
+          }
+        }
+      }
+      return message;
+    }
   }
 
   /** 클라이언트 아웃바운드 채널 설정 서버에서 클라이언트로 나가는 메시지 처리를 위한 스레드 풀 구성 */

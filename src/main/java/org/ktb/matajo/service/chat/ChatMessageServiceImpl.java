@@ -19,7 +19,7 @@ import org.ktb.matajo.repository.ChatRoomRepository;
 import org.ktb.matajo.repository.ChatUserRepository;
 import org.ktb.matajo.repository.UserRepository;
 import org.ktb.matajo.service.chat.ChatCacheService.UserCacheInfo;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.ktb.matajo.service.chat.BroadcastMessagingService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -37,7 +37,7 @@ public class ChatMessageServiceImpl implements ChatMessageService {
   private final ChatUserRepository chatUserRepository;
   private final UserRepository userRepository;
   private final ChatCacheService chatCacheService;
-  private final SimpMessagingTemplate messagingTemplate;
+  private final BroadcastMessagingService broadcastMessagingService;
 
   /** 채팅 메시지 저장 */
   @Override
@@ -176,7 +176,7 @@ public class ChatMessageServiceImpl implements ChatMessageService {
       readStatusUpdate.put("readBy", userId);
       readStatusUpdate.put("lastReadMessageId", latestMessageId);
 
-      messagingTemplate.convertAndSend("/topic/chat/" + roomId + "/status", readStatusUpdate);
+      broadcastMessagingService.convertAndSend("/topic/chat/" + roomId + "/status", readStatusUpdate);
     }
   }
 

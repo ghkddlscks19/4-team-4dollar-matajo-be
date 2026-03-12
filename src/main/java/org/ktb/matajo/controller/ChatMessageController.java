@@ -17,7 +17,7 @@ import org.springframework.messaging.handler.annotation.DestinationVariable;
 import org.springframework.messaging.handler.annotation.MessageMapping;
 import org.springframework.messaging.handler.annotation.Payload;
 import org.springframework.messaging.simp.SimpMessageHeaderAccessor;
-import org.springframework.messaging.simp.SimpMessagingTemplate;
+import org.ktb.matajo.service.chat.BroadcastMessagingService;
 import org.springframework.web.bind.annotation.*;
 
 import io.swagger.v3.oas.annotations.Operation;
@@ -39,7 +39,7 @@ import lombok.extern.slf4j.Slf4j;
 public class ChatMessageController {
 
   private final ChatMessageService chatMessageService;
-  private final SimpMessagingTemplate messagingTemplate;
+  private final BroadcastMessagingService broadcastMessagingService;
   private final ChatSessionService chatSessionService;
   private final WebSocketEventListener webSocketEventListener;
   private final NotificationService notificationService;
@@ -106,7 +106,7 @@ public class ChatMessageController {
 
     // 메시지를 특정 채팅방 구독자들에게 브로드캐스트
     log.info("브로드캐스트 시작: roomId={}, messageId={}", roomId, response.getMessageId());
-    messagingTemplate.convertAndSend("/topic/chat/" + roomId, response);
+    broadcastMessagingService.convertAndSend("/topic/chat/" + roomId, response);
     log.info("브로드캐스트 완료: roomId={}", roomId);
 
     // FCM 알림 비동기 전송 (@Async - 별도 스레드에서 실행)
@@ -198,7 +198,7 @@ public class ChatMessageController {
       // 오류 메시지를 특정 사용자에게 전송
       if (payload.containsKey("userId")) {
         Long userId = Long.valueOf(payload.get("userId").toString());
-        messagingTemplate.convertAndSendToUser(
+        broadcastMessagingService.convertAndSendToUser(
             userId.toString(), "/queue/errors", "읽음 상태 처리 중 오류가 발생했습니다.");
       }
     }
